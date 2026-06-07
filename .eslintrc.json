@@ -1,0 +1,20 @@
+{
+    "env": { "browser": true, "es2020": true },
+    "extends": ["eslint:recommended", "prettier"],
+    "rules": {
+        "no-unused-vars": "warn",
+        "no-undef": "error",
+        "eqeqeq": ["error", "always"],
+        "no-console": "off"
+    },
+    "globals": {
+        "firebase": "readonly",
+        "XLSX": "readonly",
+        "DB": "readonly",
+        "Auth": "readonly",
+        "GansoLog": "readonly",
+        "FIREBASE_CONFIG": "readonly",
+        "Chart": "readonly",
+        "Utils": "readonly"
+    }
+}

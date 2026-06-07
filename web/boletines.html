@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="author" content="Eliseo Ignacio Pérez de Villarreal">
+    <meta name="description" content="Sistema académico institucional multiplataforma para gestión de notas, boletines y sincronización escolar.">
+    <title>Boletines — Ganso-Paralelo</title>
+    <link rel="icon" type="image/x-icon" href="logos/favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="logos/favicon-32x32.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="logos/apple-touch-icon.png">
+    <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="styles.css">
+    <style>body{visibility:hidden}</style>
+</head>
+<body>
+    <header class="app-header">
+        <div class="brand">
+            <div class="brand-identity">
+                <div class="brand-logo-mark">
+                    <img src="logos/web-app-manifest-192x192.png" alt="Ganso-Paralelo">
+                </div>
+                <div class="brand-text">
+                    <h1>Ganso-Paralelo</h1>
+                    <span class="brand-module-tag">Boletines</span>
+                </div>
+            </div>
+        </div>
+        <div class="header-right">
+            <div class="header-status-group">
+                <div class="user-pill" id="userPill" style="display:none;">
+                    <span id="headerUserName">—</span>
+                    <span class="role-tag" id="headerRoleTag"></span>
+                </div>
+            </div>
+            <div class="header-main-actions">
+                <a class="secondary-button nav-button dark" href="estadisticas.html">Estadísticas</a>
+                <a class="secondary-button nav-button dark" href="admin.html" id="adminLink" style="display:none;">Panel admin</a>
+                <a class="secondary-button nav-button dark" href="index.html">Carga de notas</a>
+                <button class="danger-button dark-danger" id="logoutButton" type="button">Cerrar sesión</button>
+            </div>
+        </div>
+    </header>
+
+    <main class="app-shell">
+        <div class="boletin-grid">
+
+            <!-- ── Panel de controles ─────────────────────────────── -->
+            <div class="panel boletin-controls">
+                <div class="panel-heading">
+                    <p class="eyebrow dark">Generación</p>
+                    <h2 style="margin-top:4px;">Boletines</h2>
+                </div>
+
+                <div id="controlsLoading" style="padding:16px 0;color:var(--muted);display:flex;align-items:center;gap:10px;">
+                    <span class="spinner"></span> Cargando datos...
+                </div>
+
+                <form id="boletinForm" style="display:none;" autocomplete="off">
+
+                    <label>
+                        Curso
+                        <select id="courseSelect"></select>
+                    </label>
+
+                    <label>
+                        Alumno
+                        <select id="studentSelect">
+                            <option value="__all__">— Todos los alumnos del curso —</option>
+                        </select>
+                    </label>
+
+                    <div class="button-row">
+                        <button class="secondary-button" type="submit" id="previewBtn">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" style="flex-shrink:0;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                            Vista previa
+                        </button>
+                        <button class="primary-button" type="button" id="downloadBtn">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" style="flex-shrink:0;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            PDF
+                        </button>
+                    </div>
+
+                    <div id="batchWrap" class="hidden">
+                        <button class="secondary-button full" type="button" id="downloadAllBtn">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" style="flex-shrink:0;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            Descargar curso completo
+                        </button>
+                        <div id="batchProgressWrap" class="hidden" style="margin-top:8px;">
+                            <div style="font-size:12px;color:var(--muted);margin-bottom:4px;" id="batchProgressText"></div>
+                            <div class="batch-progress-bar-wrap">
+                                <div class="batch-progress-bar" id="batchProgressBar" style="width:0%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+
+                <!-- Configuración del boletín -->
+                <div class="boletin-options-divider" id="boletinOptions" style="display:none;">
+                    <p class="eyebrow dark">Configuración del boletín</p>
+
+                    <label style="gap:5px;font-size:12px;font-weight:800;">
+                        Período evaluativo
+                        <input id="periodoInput" type="text" list="periodoList"
+                               placeholder="Ej: 1° Cuatrimestre" style="min-height:36px;font-size:13px;">
+                        <datalist id="periodoList">
+                            <option value="1° Cuatrimestre"></option>
+                            <option value="2° Cuatrimestre"></option>
+                            <option value="3° Cuatrimestre"></option>
+                            <option value="1° Trimestre"></option>
+                            <option value="2° Trimestre"></option>
+                            <option value="3° Trimestre"></option>
+                            <option value="Anual"></option>
+                        </datalist>
+                    </label>
+
+                    <label style="gap:5px;font-size:12px;font-weight:800;">
+                        Año lectivo
+                        <input id="schoolYear" type="text" placeholder="Ej: 2025"
+                               style="min-height:36px;font-size:13px;">
+                    </label>
+
+                    <label style="gap:5px;font-size:12px;font-weight:800;">
+                        Firma del director/a
+                        <input id="directorName" type="text"
+                               placeholder="Ej: Prof. Fernando L. Puchetta" style="min-height:36px;font-size:13px;">
+                        <input id="directorTitle" type="text"
+                               placeholder="Ej: Director Nivel Secundario" style="min-height:36px;font-size:13px;margin-top:4px;">
+                    </label>
+
+                    <label style="gap:5px;font-size:12px;font-weight:800;">
+                        Observación institucional
+                        <textarea id="institutionalNote"
+                                  placeholder="Nota opcional al pie del boletín..."
+                                  style="min-height:60px;font-size:12px;"></textarea>
+                    </label>
+
+                    <details style="margin-top:4px;">
+                        <summary style="font-size:11px;color:var(--primary);font-weight:800;cursor:pointer;">
+                            Rangos TEA / TEP / TED
+                        </summary>
+                        <div style="margin-top:10px;display:grid;gap:8px;">
+                            <label style="gap:4px;font-size:11px;font-weight:700;">
+                                TEA desde (promedio ≥)
+                                <input id="teaMin" type="number" min="0" max="10" step="0.5" value="7"
+                                       style="min-height:32px;font-size:13px;">
+                            </label>
+                            <label style="gap:4px;font-size:11px;font-weight:700;">
+                                TEP desde (promedio ≥)
+                                <input id="tepMin" type="number" min="0" max="10" step="0.5" value="4"
+                                       style="min-height:32px;font-size:13px;">
+                            </label>
+                            <p style="font-size:11px;color:var(--muted);margin:0;line-height:1.5;">
+                                Por debajo del umbral TEP → TED.<br>
+                                Sin notas cargadas → sin calificación.
+                            </p>
+                        </div>
+                    </details>
+                </div>
+            </div>
+
+            <!-- ── Panel de vista previa ──────────────────────────── -->
+            <div class="panel boletin-preview-panel" id="previewPanel">
+                <div class="boletin-preview-placeholder" id="previewPlaceholder">
+                    <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                        <polyline points="14 2 14 8 20 8"/>
+                        <line x1="16" y1="13" x2="8" y2="13"/>
+                        <line x1="16" y1="17" x2="8" y2="17"/>
+                    </svg>
+                    <p style="margin:0;font-size:15px;font-weight:700;color:var(--ink);">Vista previa del boletín</p>
+                    <p style="margin:0;font-size:13px;max-width:240px;line-height:1.5;">Seleccioná un curso y alumno, luego hacé clic en <strong>Vista previa</strong></p>
+                </div>
+                <div class="boletin-preview-wrap hidden" id="previewContainer"></div>
+            </div>
+
+        </div>
+    </main>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+    <script src="firebase-config.js"></script>
+    <script src="auth.js"></script>
+    <script src="db.js"></script>
+    <script src="ganso-log.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.1/jspdf.plugin.autotable.min.js"></script>
+    <script src="utils.js"></script>
+    <script src="boletines.js"></script>
+</body>
+</html>

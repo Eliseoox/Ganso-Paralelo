@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="author" content="Eliseo Ignacio Pérez de Villarreal">
+    <meta name="description" content="Sistema académico institucional multiplataforma para gestión de notas, boletines y sincronización escolar.">
+    <title>Administración — Ganso-Paralelo</title>
+    <link rel="icon" href="logos/favicon.ico" sizes="any">
+    <link rel="icon" href="logos/favicon.svg" type="image/svg+xml">
+    <link rel="icon" type="image/png" sizes="96x96" href="logos/favicon-96x96.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="logos/favicon-32x32.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="logos/apple-touch-icon.png">
+    <link rel="stylesheet" href="styles.css">
+    <style>body{visibility:hidden}</style>
+</head>
+<body>
+    <header class="app-header">
+        <div class="brand">
+            <div class="brand-identity">
+                <div class="brand-logo-mark">
+                    <img src="logos/web-app-manifest-192x192.png" alt="Ganso-Paralelo">
+                </div>
+                <div class="brand-text">
+                    <h1>Ganso-Paralelo</h1>
+                    <span class="brand-module-tag">Panel de administración</span>
+                </div>
+            </div>
+        </div>
+        <div class="header-actions">
+            <div class="user-info">
+                <div class="user-pill">
+                    <span id="adminName">Cargando...</span>
+                    <span class="role-tag admin">Admin</span>
+                </div>
+            </div>
+            <a class="secondary-button nav-button dark" href="estadisticas.html">Estadísticas</a>
+            <a class="secondary-button nav-button dark" href="boletines.html">Boletines</a>
+            <a class="primary-button nav-button" href="index.html" style="font-weight:800;">↗ Ir a notas</a>
+            <button class="danger-button dark-danger" id="logoutButton" type="button">Cerrar sesión</button>
+        </div>
+    </header>
+
+    <main class="app-shell">
+        <div class="notice hidden" id="adminNotice">
+            <strong id="adminNoticeText"></strong>
+        </div>
+
+        <!-- ── Pantalla 1: Selector de institución ─────────────── -->
+        <div id="instPickerScreen">
+            <div style="margin-bottom:18px;">
+                <p class="eyebrow dark">Administración</p>
+                <h2 style="margin:4px 0 6px;font-size:clamp(22px,3vw,30px);">Seleccioná una institución</h2>
+                <p style="margin:0;color:var(--muted);">Hacé clic en una institución para comenzar a trabajar.</p>
+            </div>
+
+            <div class="data-table-wrap" id="instTableWrap">
+                <div style="padding:18px;color:var(--muted);">Cargando...</div>
+            </div>
+
+            <details class="collapsible-panel" style="margin-top:16px;">
+                <summary>+ Agregar nueva institución</summary>
+                <form id="instForm">
+                    <label>
+                        Nombre de la institución
+                        <input id="instName" type="text" placeholder="Ej: Colegio San Pedro" required>
+                    </label>
+                    <label>
+                        ID institucional
+                        <input id="instId" type="text" placeholder="Ej: san_pedro" required>
+                    </label>
+                    <button class="primary-button" type="submit">Guardar institución</button>
+                </form>
+            </details>
+        </div>
+
+        <!-- ── Pantalla 2: Contenido admin ─────────────────────── -->
+        <div id="adminContent" class="hidden">
+
+            <!-- Barra de contexto -->
+            <div class="inst-context-bar">
+                <div class="inst-context-info">
+                    <span class="eyebrow dark">Institución seleccionada</span>
+                    <span class="inst-context-name" id="selectedInstName">—</span>
+                    <code class="inst-context-id" id="selectedInstIdDisplay">—</code>
+                </div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                    <a class="notes-cta-banner-inline" href="index.html">↗ Ir a notas</a>
+                    <button class="secondary-button" id="changeInstBtn" type="button">Cambiar institución</button>
+                </div>
+            </div>
+
+            <!-- Banner CTA notas -->
+            <a class="notes-cta-banner" href="index.html">
+                <div>
+                    <strong>Cargar notas</strong>
+                    <span>Ir al sistema de carga de calificaciones</span>
+                </div>
+                <span class="notes-cta-arrow">→</span>
+            </a>
+
+            <!-- Tabs de navegación -->
+            <div class="tab-bar" role="tablist">
+                <button class="tab-btn active" data-tab="usuarios" role="tab">Usuarios</button>
+                <button class="tab-btn" data-tab="materias" role="tab">Materias</button>
+            </div>
+
+            <!-- ── Tab: Usuarios ──────────────────────────────── -->
+            <div class="tab-panel active" id="tab-usuarios">
+                <div class="panel" style="margin-bottom:18px;">
+                    <p class="admin-section-title">Agregar usuario</p>
+                    <p class="admin-section-desc">
+                        El usuario podrá ingresar con el correo y contraseña que definas.
+                        Luego podrá cambiar su contraseña desde Firebase.
+                    </p>
+                    <form id="addUserForm">
+                        <div class="inline-form">
+                            <label>Nombre completo<input id="newUserName" type="text" placeholder="Ej: Juan Pérez" required></label>
+                            <label>Correo<input id="newUserEmail" type="email" placeholder="usuario@colegio.edu" required></label>
+                            <label>Contraseña temporal<input id="newUserPass" type="password" placeholder="Mínimo 6 caracteres" required minlength="6"></label>
+                            <label>Rol
+                                <select id="newUserRole">
+                                    <option value="profesor">Profesor</option>
+                                    <option value="preceptoria">Preceptoría</option>
+                                    <option value="admin">Administrador</option>
+                                </select>
+                            </label>
+                            <button class="primary-button" type="submit" id="addUserBtn">Crear usuario</button>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="panel">
+                    <p class="admin-section-title">Usuarios registrados</p>
+                    <p class="admin-section-desc">Usuarios de esta institución que han iniciado sesión al menos una vez.</p>
+                    <div class="data-table-wrap" id="usersTableWrap">
+                        <div style="padding:18px;color:var(--muted);">Cargando...</div>
+                    </div>
+                </div>
+
+                <!-- Gestión de alumnos -->
+                <div class="student-mgmt-grid">
+                    <!-- Agregar alumno -->
+                    <div class="panel">
+                        <p class="admin-section-title">Agregar alumno</p>
+                        <p class="admin-section-desc">Se agrega a <strong>todas las materias</strong> del curso seleccionado.</p>
+                        <form id="addStudentForm">
+                            <label>Curso
+                                <select id="addStuCourse" required>
+                                    <option value="">Cargando cursos...</option>
+                                </select>
+                            </label>
+                            <label>Apellido/s<input id="addStuLastName" type="text" placeholder="Ej: García González" required></label>
+                            <label>Nombre<input id="addStuFirstName" type="text" placeholder="Ej: Lautaro" required></label>
+                            <button class="primary-button full" type="submit" id="addStudentBtn">Agregar alumno</button>
+                        </form>
+                    </div>
+
+                    <!-- Quitar alumno -->
+                    <div class="panel">
+                        <p class="admin-section-title">Quitar alumno</p>
+                        <p class="admin-section-desc">Se elimina de <strong>todas las materias</strong> del curso. No se puede deshacer.</p>
+                        <div>
+                            <label>Curso
+                                <select id="rmStuCourse">
+                                    <option value="">Cargando cursos...</option>
+                                </select>
+                            </label>
+                            <button class="secondary-button full" type="button" id="loadRmStudentsBtn" style="margin-top:10px;">Buscar alumnos</button>
+                        </div>
+                        <div id="rmStudentListWrap" class="hidden" style="margin-top:16px;">
+                            <label>Alumno
+                                <select id="rmStudentSelect"></select>
+                            </label>
+                            <button class="danger-button full" type="button" id="removeStudentFromAllBtn" style="margin-top:10px;">Quitar alumno de todas las materias</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ── Tab: Materias ──────────────────────────────── -->
+            <div class="tab-panel" id="tab-materias">
+                <div class="panel" style="margin-bottom:18px;">
+                    <p class="admin-section-title">Inicializar materia</p>
+                    <p class="admin-section-desc">Crea la estructura base para los cursos seleccionados. Si ya hay alumnos registrados para un curso, se copian automáticamente. Si no, se generan nombres aleatorios.</p>
+                    <form id="initSubjectForm">
+                        <label>Materia<input id="initSubjectName" type="text" placeholder="Ej: Matemática" required list="initSubjectOptions"></label>
+                        <datalist id="initSubjectOptions">
+                            <option value="Matemática"></option>
+                            <option value="Lengua"></option>
+                            <option value="Ciencias Sociales"></option>
+                            <option value="Ciencias Naturales"></option>
+                            <option value="Inglés"></option>
+                            <option value="Historia"></option>
+                            <option value="Geografía"></option>
+                            <option value="Educación Física"></option>
+                            <option value="Música"></option>
+                            <option value="Plástica"></option>
+                        </datalist>
+                        <div>
+                            <p style="margin:0 0 6px;font-size:13px;font-weight:800;color:#344054;">Cursos que tendrán esta materia</p>
+                            <div class="course-check-grid" id="initSubjectCourses">
+                                <label class="check-label"><input type="checkbox" value="1ero" checked> 1ero</label>
+                                <label class="check-label"><input type="checkbox" value="2do" checked> 2do</label>
+                                <label class="check-label"><input type="checkbox" value="3ero" checked> 3ero</label>
+                                <label class="check-label"><input type="checkbox" value="4to" checked> 4to</label>
+                                <label class="check-label"><input type="checkbox" value="5to" checked> 5to</label>
+                                <label class="check-label"><input type="checkbox" value="6to" checked> 6to</label>
+                            </div>
+                        </div>
+                        <div class="inline-form">
+                            <label>Alumnos por curso <span style="font-weight:400;color:var(--muted);">(solo si no hay alumnos previos)</span>
+                                <input id="initStudentsCount" type="number" min="1" max="50" value="30" placeholder="Ej: 28">
+                            </label>
+                            <button class="primary-button" type="submit" id="initSubjectBtn" style="align-self:flex-end;">Inicializar materia</button>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="panel">
+                    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:8px;">
+                        <div>
+                            <p class="admin-section-title" style="margin-bottom:0;">Materias del sistema</p>
+                            <p class="admin-section-desc" style="margin-bottom:0;">Podés bloquear o desbloquear la edición de cada materia.</p>
+                        </div>
+                        <button class="secondary-button" type="button" id="loadSubjectsBtn">↺ Recargar</button>
+                    </div>
+                    <div class="data-table-wrap" id="subjectsTableWrap">
+                        <div style="padding:18px;color:var(--muted);">Cargando...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+    <script src="firebase-config.js"></script>
+    <script src="auth.js"></script>
+    <script src="db.js"></script>
+    <script src="admin.js"></script>
+</body>
+</html>

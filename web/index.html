@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="author" content="Eliseo Ignacio Pérez de Villarreal">
+    <meta name="description" content="Sistema académico institucional multiplataforma para gestión de notas, boletines y sincronización escolar.">
+    <title>Ganso-Paralelo — Carga de notas</title>
+    <link rel="icon" href="logos/favicon.ico" sizes="any">
+    <link rel="icon" href="logos/favicon.svg" type="image/svg+xml">
+    <link rel="icon" type="image/png" sizes="96x96" href="logos/favicon-96x96.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="logos/favicon-32x32.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="logos/apple-touch-icon.png">
+    <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
+    <link rel="preconnect" href="https://apis.google.com" crossorigin>
+    <link rel="stylesheet" href="styles.css">
+    <style>body{visibility:hidden}</style>
+</head>
+<body>
+    <header class="app-header">
+        <div class="brand">
+            <div class="brand-identity">
+                <div class="brand-logo-mark" id="headerLogoMark">
+                    <img src="logos/web-app-manifest-192x192.png" alt="Ganso-Paralelo">
+                </div>
+                <div class="brand-text">
+                    <h1>Ganso-Paralelo</h1>
+                    <span class="brand-module-tag">Carga de notas</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="header-right">
+            <!-- Estado y usuario -->
+            <div class="header-status-group">
+                <div class="lock-badge hidden" id="lockBadge">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <rect x="3" y="11" width="18" height="11" rx="2"/>
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                    </svg>
+                    Edición bloqueada
+                </div>
+                <span class="sync-pill" id="syncStatus">Conectando...</span>
+                <div class="user-pill" id="userPill" style="display:none;">
+                    <span id="headerUserName">—</span>
+                    <span class="role-tag" id="headerRoleTag"></span>
+                </div>
+            </div>
+
+            <!-- Acciones principales -->
+            <div class="header-main-actions">
+                <a class="secondary-button nav-button dark" href="estadisticas.html" id="statsLink" style="display:none;">Estadísticas</a>
+                <a class="secondary-button nav-button dark" href="boletines.html" id="boletinesLink" style="display:none;">Boletines</a>
+                <a class="secondary-button nav-button dark" href="admin.html" id="adminPanelLink" style="display:none;">Panel admin</a>
+                <button class="danger-button dark-danger" id="logoutButton" type="button">Cerrar sesión</button>
+
+                <!-- Menú desplegable de herramientas -->
+                <div class="header-tools-wrap" id="headerToolsWrap">
+                    <button class="secondary-button dark header-tools-toggle" id="headerToolsToggle" type="button"
+                            aria-haspopup="true" aria-expanded="false">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="3"/>
+                            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                        </svg>
+                        Opciones
+                        <svg class="chevron-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+                            <polyline points="6 9 12 15 18 9"/>
+                        </svg>
+                    </button>
+                    <div class="header-tools-panel hidden" id="headerToolsPanel" role="menu">
+                        <button class="tools-item" id="changeInstButton" type="button" role="menuitem">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                            Cambiar institución
+                        </button>
+                        <div class="tools-separator"></div>
+                        <button class="tools-item" id="backupButton" type="button" role="menuitem">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            Descargar backup
+                        </button>
+                        <button class="tools-item" id="restoreButton" type="button" role="menuitem">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+                            Restaurar backup
+                        </button>
+                        <button class="tools-item" id="restoreAutoBackupButton" type="button" role="menuitem">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                            Auto-backup
+                        </button>
+                        <div class="tools-separator"></div>
+                        <button class="tools-item tools-item-danger" id="clearAllButton" type="button" role="menuitem">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+                            Borrar todos los datos
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="app-shell">
+        <div class="notice initial-notice" id="fileNotice">
+            <strong>Para comenzar, seleccioná la materia y cargá los datos del sistema</strong>
+            <span>El sistema te guiará paso a paso hasta generar el archivo final.</span>
+        </div>
+
+        <section class="system-status" aria-label="Estado del sistema">
+            <div class="status-item" id="statusSubject">Materia: pendiente</div>
+            <div class="status-item" id="statusFile">Datos: pendiente</div>
+            <div class="status-item" id="statusNotes">Notas: en progreso</div>
+        </section>
+
+        <ol class="stepper" id="stepper" aria-label="Flujo de trabajo">
+            <li><button type="button" data-go-step="1"><span>1</span>Materia</button></li>
+            <li><button type="button" data-go-step="2"><span>2</span>Datos</button></li>
+            <li><button type="button" data-go-step="3"><span>3</span>Carga de notas</button></li>
+            <li><button type="button" data-go-step="4"><span>4</span>Exportación</button></li>
+        </ol>
+
+        <!-- ── Paso 1: Materia ────────────────────────────────── -->
+        <section class="step-panel" data-step-panel="1" aria-labelledby="subjectTitle">
+            <section class="panel compact-panel">
+                <div class="panel-heading">
+                    <p class="eyebrow dark">Paso 1</p>
+                    <h2 id="subjectTitle">Seleccionar materia</h2>
+                </div>
+
+                <form id="subjectForm">
+                    <label>
+                        Materia
+                        <input id="subjectInput" list="subjectOptions" type="text" placeholder="Ej: Matemática">
+                    </label>
+                    <datalist id="subjectOptions">
+                        <option value="Matemática"></option>
+                        <option value="Lengua"></option>
+                        <option value="Ciencias Sociales"></option>
+                        <option value="Ciencias Naturales"></option>
+                        <option value="Inglés"></option>
+                        <option value="Historia"></option>
+                        <option value="Geografía"></option>
+                        <option value="Educación Física"></option>
+                        <option value="Música"></option>
+                        <option value="Plástica"></option>
+                    </datalist>
+                    <button class="primary-button full" id="confirmSubjectButton" type="submit">
+                        Continuar
+                    </button>
+                </form>
+            </section>
+        </section>
+
+        <!-- ── Paso 2: Datos ──────────────────────────────────── -->
+        <section class="step-panel" data-step-panel="2" aria-labelledby="dataTitle">
+            <section class="panel">
+                <div class="panel-heading">
+                    <p class="eyebrow dark">Paso 2</p>
+                    <h2 id="dataTitle">Cargar datos</h2>
+                </div>
+
+                <!-- Datos guardados localmente -->
+                <div class="saved-box hidden" id="savedDataBox">
+                    <div>
+                        <strong>Datos guardados encontrados</strong>
+                        <p id="savedDraftText">—</p>
+                    </div>
+                    <div class="button-row fit">
+                        <button class="primary-button" id="continueSavedButton" type="button">Continuar</button>
+                        <button class="secondary-button" id="startNewButton" type="button">Empezar nuevo</button>
+                    </div>
+                </div>
+
+                <!-- Datos del sistema (Firestore) -->
+                <div class="db-status-box hidden" id="dbDataBox">
+                    <div>
+                        <strong id="dbDataTitle">Datos en el sistema</strong>
+                        <p id="dbDataText">—</p>
+                    </div>
+                    <div class="button-row fit">
+                        <button class="primary-button" id="loadFromDbButton" type="button">Cargar desde sistema</button>
+                        <button class="secondary-button" id="dismissDbDataBtn" type="button">Ignorar</button>
+                    </div>
+                </div>
+
+                <div class="import-options">
+                    <div class="import-option-card">
+                        <strong>Datos de muestra</strong>
+                        <p>Genera alumnos y notas ficticias en los 6 cursos — para visualización y pruebas.</p>
+                        <button class="secondary-button full" id="generateSampleBtn" type="button">Generar muestra</button>
+                    </div>
+                    <div class="import-option-card">
+                        <strong>Importar Excel</strong>
+                        <p>Cargá datos desde un .xlsx propio — un curso por hoja, columna "Alumno" requerida, columnas "Nota N" para las notas.</p>
+                        <button class="secondary-button full" id="openWorkbookButton" type="button">Seleccionar Excel</button>
+                        <span id="sourceSummary" style="color:var(--muted);font-size:13px;">Sin archivo cargado.</span>
+                    </div>
+                </div>
+
+                <div class="message-list" id="validationList" aria-live="polite"></div>
+            </section>
+        </section>
+
+        <!-- ── Paso 3: Carga de notas ─────────────────────────── -->
+        <section class="step-panel" data-step-panel="3" aria-labelledby="gradeTitle">
+            <section class="main-grid">
+                <section class="panel grade-panel" aria-labelledby="gradeTitle">
+                    <div class="panel-heading grade-panel-heading">
+                        <div>
+                            <p class="eyebrow dark">Paso 3</p>
+                            <h2 id="gradeTitle">Cargar notas</h2>
+                        </div>
+                        <button class="panel-toggle-btn" id="panelToggleBtn" type="button" title="Ocultar panel lateral" aria-label="Ocultar panel lateral">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="15 18 9 12 15 6"/>
+                            </svg>
+                        </button>
+                    </div>
+
+                    <form id="gradeForm">
+                        <label>
+                            Curso
+                            <select id="courseSelect"></select>
+                        </label>
+
+                        <label>
+                            Alumno
+                            <select id="studentSelect"></select>
+                        </label>
+
+                        <label>
+                            Columna
+                            <select id="gradeColumnSelect"></select>
+                        </label>
+
+                        <label>
+                            Nota
+                            <input id="gradeInput" type="number" min="0" max="10" step="0.01" placeholder="0 a 10">
+                        </label>
+
+                        <div class="current-note" id="currentNote">Nota actual: sin cargar</div>
+
+                        <div class="button-row">
+                            <button class="primary-button" id="insertButton" type="submit">Insertar</button>
+                            <button class="secondary-button" id="changeButton" type="button">Cambiar</button>
+                            <button class="danger-button" id="deleteGradeButton" type="button">Borrar nota</button>
+                        </div>
+
+                        <button class="primary-button full" id="goReviewButton" type="button">
+                            Revisar y exportar
+                        </button>
+                    </form>
+
+                    <!-- Estado y observaciones del alumno seleccionado -->
+                    <div class="student-extras-panel" id="studentExtrasPanel">
+                        <label>
+                            Estado del alumno
+                            <select id="studentStatusSelect">
+                                <option value="">Activo</option>
+                                <option value="libre">Libre</option>
+                                <option value="recursante">Recursante</option>
+                                <option value="promovido">Promovido</option>
+                            </select>
+                        </label>
+                        <label>
+                            Observaciones
+                            <textarea id="studentNotesInput" placeholder="Ej: recuperó en diciembre, situación especial..." rows="3" maxlength="500"></textarea>
+                        </label>
+                        <button class="secondary-button full" id="saveStudentExtrasBtn" type="button">Guardar</button>
+                    </div>
+                </section>
+
+                <section class="table-panel" aria-labelledby="tableTitle">
+                    <div class="table-header" style="padding:20px 20px 0;">
+                        <div>
+                            <p class="eyebrow dark">Vista del curso</p>
+                            <h2 id="tableTitle">Sin curso seleccionado</h2>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end;">
+                            <div class="stats">
+                                <span id="loadedCount">0 notas</span>
+                                <strong id="courseAverage">Promedio: —</strong>
+                                <span id="lastUpdatedAt">Última: —</span>
+                            </div>
+                            <div class="table-actions">
+                            <button class="secondary-button" id="openHistoryBtn" type="button">Ver historial</button>
+                        </div>
+                        </div>
+                    </div>
+
+                    <div style="padding:0 20px;">
+                        <div class="course-tabs" id="courseTabs" aria-label="Cursos"></div>
+                    </div>
+
+                    <div class="add-col-cta-wrap">
+                        <button class="add-col-cta-btn" id="addColCtaBtn" type="button">+ Agregar evaluación</button>
+                    </div>
+
+                    <div class="table-top-scroll" id="tableTopScroll" aria-hidden="true">
+                        <div id="tableTopScrollInner"></div>
+                    </div>
+
+                    <div class="student-search-wrap">
+                        <input id="studentSearch" type="search" placeholder="Buscar alumno..." autocomplete="off" aria-label="Buscar alumno en la tabla">
+                    </div>
+
+                    <div class="table-wrap" style="margin:0 20px 20px;">
+                        <table>
+                            <thead id="tableHead"></thead>
+                            <tbody id="tableBody"></tbody>
+                        </table>
+                    </div>
+                </section>
+            </section>
+        </section>
+
+        <!-- ── Paso 4: Exportación ────────────────────────────── -->
+        <section class="step-panel" data-step-panel="4" aria-labelledby="reviewTitle">
+            <section class="panel">
+                <div class="panel-heading">
+                    <p class="eyebrow dark">Paso 4</p>
+                    <h2 id="reviewTitle">Exportación</h2>
+                </div>
+
+                <div class="review-grid">
+                    <div class="metric"><span>Materia</span><strong id="reviewSubject">—</strong></div>
+                    <div class="metric"><span>Cursos</span><strong id="reviewCourses">0</strong></div>
+                    <div class="metric"><span>Alumnos</span><strong id="reviewStudents">0</strong></div>
+                    <div class="metric"><span>Notas</span><strong id="reviewLoaded">0</strong></div>
+                    <div class="metric"><span>Faltantes</span><strong id="reviewMissing">0</strong></div>
+                    <div class="metric"><span>Promedio</span><strong id="reviewAverage">—</strong></div>
+                </div>
+
+                <div class="table-wrap review-wrap">
+                    <table class="review-table">
+                        <thead>
+                            <tr>
+                                <th>Curso</th>
+                                <th>Alumnos</th>
+                                <th>Aprobados</th>
+                                <th>Desaprobados</th>
+                                <th>Notas cargadas</th>
+                                <th>Faltantes</th>
+                                <th>Promedio</th>
+                                <th>Última actualización</th>
+                            </tr>
+                        </thead>
+                        <tbody id="reviewTableBody"></tbody>
+                    </table>
+                </div>
+
+                <div class="button-row end-row">
+                    <button class="secondary-button" id="backToEditButton" type="button">Volver a notas</button>
+                </div>
+
+                <div class="export-card">
+                    <p class="export-warning">Verificá que las notas sean correctas antes de generar el archivo final</p>
+                    <div class="export-summary" id="exportSummary">Complete los pasos anteriores para exportar.</div>
+
+                    <div class="button-row" style="margin-top:14px;">
+                        <button class="primary-button export-button" id="exportExcelButton" type="button">
+                            Generar archivo final
+                        </button>
+                        <button class="secondary-button" id="backupButtonSecondary" type="button">
+                            Descargar backup
+                        </button>
+                    </div>
+                </div>
+            </section>
+        </section>
+    </main>
+
+    <input id="workbookInput" type="file" accept=".xls,.xlsx,.xlsm" hidden>
+    <input id="restoreInput" type="file" accept=".json" hidden>
+
+    <!-- Modal de éxito al exportar -->
+    <div class="export-success-overlay hidden" id="exportSuccessOverlay" role="dialog" aria-modal="true" aria-labelledby="exportSuccessTitle">
+        <div class="export-success-card">
+            <div class="export-success-icon">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="20 6 9 17 4 12"/>
+                </svg>
+            </div>
+            <h2 class="export-success-title" id="exportSuccessTitle">¡Excel exportado con éxito!</h2>
+            <p class="export-success-file" id="exportSuccessFile"></p>
+            <div class="export-success-actions">
+                <button class="secondary-button" id="exportShareBtn" type="button">
+                    Enviar por correo
+                </button>
+                <button class="primary-button export-success-btn" id="exportSuccessBtn" type="button">Volver al inicio</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <!-- Modal: agregar columna de nota -->
+    <div class="modal-overlay hidden" id="addGradeColModal" role="dialog" aria-modal="true" aria-labelledby="addGradeColModalTitle">
+        <div class="modal-card">
+            <p class="modal-eyebrow">Nueva evaluación</p>
+            <h3 id="addGradeColModalTitle">Agregar columna de nota</h3>
+            <p class="modal-desc">Al confirmar se creará una nueva columna de nota para todos los cursos de esta materia.</p>
+            <form id="addGradeColForm">
+                <label>
+                    Nombre de la evaluación <span style="color:var(--danger)">*</span>
+                    <input id="newGradeColName" type="text" placeholder="Ej: Primer examen parcial" maxlength="60" required autocomplete="off">
+                </label>
+                <label>
+                    Descripción <span style="color:var(--danger)">*</span>
+                    <textarea id="newGradeColDesc" placeholder="Ej: Evaluación de la unidad 1 y 2. Fecha: 15/03" required></textarea>
+                </label>
+                <div class="button-row">
+                    <button class="primary-button" type="submit">Agregar columna</button>
+                    <button class="secondary-button" type="button" id="cancelAddGradeColBtn">Cancelar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal: información/edición de columna de nota -->
+    <div class="modal-overlay hidden" id="gradeColInfoModal" role="dialog" aria-modal="true" aria-labelledby="gradeColInfoModalTitle">
+        <div class="modal-card">
+            <p class="modal-eyebrow" id="gradeColInfoModalEyebrow">Detalle de evaluación</p>
+            <h3 id="gradeColInfoModalTitle">—</h3>
+            <form id="gradeColInfoForm">
+                <label>
+                    Nombre de la evaluación
+                    <input id="editGradeColName" type="text" maxlength="60" autocomplete="off">
+                </label>
+                <label>
+                    Descripción
+                    <textarea id="editGradeColDesc" placeholder="Sin descripción"></textarea>
+                </label>
+                <div class="button-row">
+                    <button class="primary-button" type="submit">Guardar cambios</button>
+                    <button class="secondary-button" type="button" id="closeGradeColInfoBtn">Cerrar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal: enviar Excel por correo (solo .exe) -->
+    <div class="modal-overlay hidden" id="shareEmailModal" role="dialog" aria-modal="true" aria-labelledby="shareEmailModalTitle">
+        <div class="modal-card">
+            <p class="modal-eyebrow">Compartir archivo</p>
+            <h3 id="shareEmailModalTitle">Enviar Excel por correo</h3>
+            <p class="modal-desc">Ingresá el correo destinatario. El archivo Excel se enviará directamente sin necesidad de abrir ningún cliente de correo.</p>
+            <form id="shareEmailForm">
+                <label>
+                    Correo electrónico
+                    <input id="shareEmailInput" type="email" list="shareEmailList"
+                           placeholder="usuario@colegio.edu" autocomplete="email" required>
+                    <datalist id="shareEmailList">
+                        <option value="e.perez@jmestrada.edu.ar">
+                    </datalist>
+                </label>
+                <div class="button-row">
+                    <button class="primary-button" type="submit" id="shareEmailSendBtn">Enviar</button>
+                    <button class="secondary-button" type="button" id="cancelShareEmailBtn">Cancelar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal: historial de actividad en pantalla -->
+    <div class="modal-overlay hidden" id="historyModal" role="dialog" aria-modal="true" aria-labelledby="historyModalTitle">
+        <div class="modal-card modal-card-wide">
+            <p class="modal-eyebrow">Registro de actividad</p>
+            <h3 id="historyModalTitle">Historial de cambios</h3>
+            <input type="search" id="historySearch" placeholder="Buscar por alumno, curso o acción..." autocomplete="off">
+            <div class="history-table-wrap">
+                <table class="history-modal-table">
+                    <thead>
+                        <tr>
+                            <th>Fecha</th>
+                            <th>Acción</th>
+                            <th>Curso</th>
+                            <th>Alumno</th>
+                            <th>Columna</th>
+                            <th>Ant.</th>
+                            <th>Nuevo</th>
+                        </tr>
+                    </thead>
+                    <tbody id="historyModalBody"></tbody>
+                </table>
+            </div>
+            <div class="button-row" style="margin-top:14px;">
+                <button class="secondary-button" id="closeHistoryBtn" type="button">Cerrar</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="vendor/xlsx.full.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+    <script src="firebase-config.js"></script>
+    <script src="auth.js"></script>
+    <script src="db.js"></script>
+    <script src="ganso-log.js"></script>
+    <script src="utils.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>

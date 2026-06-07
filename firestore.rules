@@ -1,0 +1,93 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function userRole() {
+      return userDoc().data.role;
+    }
+
+    function userInstId() {
+      return userDoc().data.institutionId;
+    }
+
+    function isAdmin() {
+      return isAuth() && userRole() == 'admin';
+    }
+
+    function canEdit() {
+      return isAuth() && userRole() in ['admin', 'profesor'];
+    }
+
+    function sameInst(instId) {
+      return isAuth() && userInstId() == instId;
+    }
+
+    // Devuelve la lista de instituciones a las que pertenece el usuario.
+    // Soporta tanto el campo nuevo (institutionIds[]) como el legado (institutionId).
+    function userInstIds() {
+      let d = userDoc().data;
+      return d.keys().hasAll(['institutionIds']) ? d.institutionIds : [d.institutionId];
+    }
+
+    // ── /users/{uid} ──────────────────────────────────────────────────────────
+    // Cada usuario puede leer su propio perfil.
+    // Solo admins pueden leer perfiles ajenos, crear, modificar y eliminar usuarios.
+    match /users/{uid} {
+      allow read:   if isAuth() && (request.auth.uid == uid || isAdmin());
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── /institutions/{id} ────────────────────────────────────────────────────
+    // Admins pueden leer cualquier institución.
+    // Usuarios no-admin solo pueden leer las instituciones a las que pertenecen.
+    // Solo admins pueden crear, modificar o eliminar instituciones.
+    match /institutions/{id} {
+      allow read:   if isAuth() && (isAdmin() || id in userInstIds());
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── /subjectData/{docId} ─────────────────────────────────────────────────
+    // Admins acceden a cualquier institución.
+    // Usuarios no-admin acceden solo a instituciones en las que son miembros (institutionIds[]).
+    // Si la materia está bloqueada, solo el admin puede modificarla.
+    match /subjectData/{docId} {
+      allow read:   if isAuth()
+                    && (isAdmin() || resource.data.institutionId in userInstIds());
+
+      allow create: if canEdit()
+                    && (isAdmin() || request.resource.data.institutionId in userInstIds());
+
+      allow update: if canEdit()
+                    && (isAdmin() || resource.data.institutionId in userInstIds())
+                    && (isAdmin() || resource.data.locked != true);
+
+      allow delete: if isAdmin();
+    }
+
+    // ── /history/{docId} ─────────────────────────────────────────────────────
+    // Append-only. Admins acceden a cualquier institución.
+    // Usuarios no-admin solo a sus instituciones miembro (institutionIds[]).
+    match /history/{docId} {
+      allow read:   if isAuth()
+                    && (isAdmin() || resource.data.institutionId in userInstIds());
+      allow create: if canEdit()
+                    && (isAdmin() || request.resource.data.institutionId in userInstIds());
+      allow update: if false;
+      allow delete: if false;
+    }
+  }
+}

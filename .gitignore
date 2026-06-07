@@ -1,0 +1,60 @@
+﻿# ── Dependencies ──────────────────────────────────────────────────────────────
+node_modules/
+
+# ── Generated build artifacts ─────────────────────────────────────────────────
+ejecutable/electron/app/
+ejecutable/electron/dist/
+ejecutable/electron/dist-installer/
+ejecutable/electron/out/
+
+# ── Android build artifacts ───────────────────────────────────────────────────
+android/.gradle/
+android/build/
+android/app/build/
+android/app/.cxx/
+android/app/src/main/assets/public/
+
+# ── Compiled binaries ─────────────────────────────────────────────────────────
+*.apk
+*.exe
+*.aab
+
+# ── Secrets / credentials ─────────────────────────────────────────────────────
+web/firebase-config.js
+ejecutable/electron/mail-config.json
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.keystore
+*.jks
+
+# ── OS files ──────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# ── Editor files ──────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── Python cache ──────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ── Compressed archives (never on Desktop) ────────────────────────────────────
+*.zip
+*.tar.gz
+*.rar

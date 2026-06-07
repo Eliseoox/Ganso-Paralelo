@@ -1,0 +1,69 @@
+{
+  "name": "ganso-paralelo-desktop",
+  "version": "1.0.0",
+  "description": "Sistema académico institucional multiplataforma para gestión de notas, boletines y sincronización escolar. Aplicación Web + EXE Electron + APK Android con persistencia offline y sincronización multi-dispositivo.",
+  "author": {
+    "name": "Eliseo Ignacio Pérez de Villarreal",
+    "email": "p.d.v.eliseoignacio@gmail.com",
+    "url": "https://github.com/Eliseoox"
+  },
+  "license": "UNLICENSED",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Eliseoox/Ganso-Paralelo"
+  },
+  "homepage": "https://github.com/Eliseoox/Ganso-Paralelo#readme",
+  "main": "main.js",
+  "scripts": {
+    "sync": "node sync.js",
+    "electron:start": "node sync.js && electron .",
+    "electron:make": "node sync.js && electron-packager . Ganso-Paralelo --platform=win32 --arch=x64 --out=dist --overwrite --asar=false --ignore=\"^/dist\" --ignore=\"^/dist-installer\" --ignore=\"^/sync\\.js$\" --ignore=\"^/copy-dist\\.js$\" --ignore=\"node_modules/@electron/packager\" --icon=icon.ico",
+    "postelectron:make": "node copy-dist.js",
+    "build:installer": "node sync.js && electron-builder --win --x64"
+  },
+  "build": {
+    "appId": "com.gansoparalelo.app",
+    "productName": "Ganso-Paralelo",
+    "icon": "icon.ico",
+    "files": [
+      "**/*",
+      "!dist/**",
+      "!dist-installer/**",
+      "!sync.js",
+      "!copy-dist.js"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowElevation": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "installerIcon": "icon.ico",
+      "uninstallerIcon": "icon.ico",
+      "shortcutName": "Ganso-Paralelo"
+    },
+    "directories": {
+      "output": "dist-installer"
+    }
+  },
+  "dependencies": {
+    "express": "^4.22.2",
+    "nodemailer": "^8.0.7"
+  },
+  "devDependencies": {
+    "@electron/packager": "^18.3.5",
+    "electron": "^28.3.3",
+    "electron-builder": "^26.8.1"
+  }
+}

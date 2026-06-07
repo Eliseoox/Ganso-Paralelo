@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="author" content="Eliseo Ignacio Pérez de Villarreal">
+    <meta name="description" content="Sistema académico institucional multiplataforma para gestión de notas, boletines y sincronización escolar.">
+    <title>Estadísticas — Ganso-Paralelo</title>
+    <link rel="icon" type="image/x-icon" href="logos/favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="logos/favicon-32x32.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="logos/apple-touch-icon.png">
+    <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="styles.css">
+    <style>body{visibility:hidden}</style>
+</head>
+<body>
+    <header class="app-header">
+        <div class="brand">
+            <div class="brand-identity">
+                <div class="brand-logo-mark">
+                    <img src="logos/web-app-manifest-192x192.png" alt="Ganso-Paralelo">
+                </div>
+                <div class="brand-text">
+                    <h1>Ganso-Paralelo</h1>
+                    <span class="brand-module-tag">Estadísticas</span>
+                </div>
+            </div>
+        </div>
+        <div class="header-right">
+            <div class="header-status-group">
+                <div class="user-pill" id="userPill" style="display:none;">
+                    <span id="headerUserName">—</span>
+                    <span class="role-tag" id="headerRoleTag"></span>
+                </div>
+            </div>
+            <div class="header-main-actions">
+                <a class="secondary-button nav-button dark" href="boletines.html">Boletines</a>
+                <a class="secondary-button nav-button dark" href="admin.html" id="adminLink" style="display:none;">Panel admin</a>
+                <a class="secondary-button nav-button dark" href="index.html">Carga de notas</a>
+                <button class="danger-button dark-danger" id="logoutButton" type="button">Cerrar sesión</button>
+            </div>
+        </div>
+    </header>
+
+    <main class="app-shell">
+
+        <!-- Loading -->
+        <div class="stats-loading" id="statsLoading">
+            <span class="spinner"></span>
+            <span>Cargando datos académicos...</span>
+        </div>
+
+        <!-- Content (hidden until loaded) -->
+        <div id="statsContent" class="hidden">
+
+            <!-- ── Filtros ─────────────────────────────────────────── -->
+            <div class="stats-filter-bar">
+                <label>
+                    Curso
+                    <select id="filterCourse">
+                        <option value="all">Todos los cursos</option>
+                        <option value="1ero">1ero</option>
+                        <option value="2do">2do</option>
+                        <option value="3ero">3ero</option>
+                        <option value="4to">4to</option>
+                        <option value="5to">5to</option>
+                        <option value="6to">6to</option>
+                    </select>
+                </label>
+                <label>
+                    Materia
+                    <select id="filterSubject">
+                        <option value="all">Todas las materias</option>
+                    </select>
+                </label>
+                <button class="primary-button" type="button" id="applyFiltersBtn">
+                    Actualizar estadísticas
+                </button>
+            </div>
+
+            <!-- ── KPIs ───────────────────────────────────────────── -->
+            <div class="stats-kpi-grid">
+                <div class="kpi-card kpi-avg">
+                    <div class="kpi-card-label">Promedio general</div>
+                    <div class="kpi-card-value" id="kpiAvg">—</div>
+                    <div class="kpi-card-sub" id="kpiAvgSub">sobre 10 puntos</div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-card-label">Total de alumnos</div>
+                    <div class="kpi-card-value" id="kpiStudents">—</div>
+                    <div class="kpi-card-sub" id="kpiStudentsSub">en el sistema</div>
+                </div>
+                <div class="kpi-card kpi-pass">
+                    <div class="kpi-card-label">Aprobados</div>
+                    <div class="kpi-card-value" id="kpiPass">—</div>
+                    <div class="kpi-card-sub" id="kpiPassSub">porcentaje global</div>
+                </div>
+                <div class="kpi-card kpi-fail">
+                    <div class="kpi-card-label">Desaprobados</div>
+                    <div class="kpi-card-value" id="kpiFail">—</div>
+                    <div class="kpi-card-sub" id="kpiFailSub">porcentaje global</div>
+                </div>
+            </div>
+
+            <!-- ── Gráficos ───────────────────────────────────────── -->
+            <div class="stats-charts-grid">
+
+                <div class="panel chart-panel">
+                    <p class="chart-panel-title">Promedio por curso</p>
+                    <p class="chart-panel-sub">Promedio de calificaciones en todos los registros evaluados</p>
+                    <div class="chart-canvas-wrap">
+                        <canvas id="chartCourse"></canvas>
+                    </div>
+                </div>
+
+                <div class="panel chart-panel">
+                    <p class="chart-panel-title">Aprobados vs Desaprobados</p>
+                    <p class="chart-panel-sub">Distribución global de rendimiento académico</p>
+                    <div class="chart-canvas-wrap">
+                        <canvas id="chartPassFail"></canvas>
+                    </div>
+                </div>
+
+                <div class="panel chart-panel">
+                    <p class="chart-panel-title">Promedio por materia</p>
+                    <p class="chart-panel-sub">Rendimiento comparado entre áreas curriculares</p>
+                    <div class="chart-canvas-wrap">
+                        <canvas id="chartSubject"></canvas>
+                    </div>
+                </div>
+
+                <div class="panel chart-panel">
+                    <p class="chart-panel-title">Materias con más desaprobados</p>
+                    <p class="chart-panel-sub">Porcentaje de alumnos desaprobados por materia</p>
+                    <div class="chart-canvas-wrap">
+                        <canvas id="chartFailRate"></canvas>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- ── Tablas ─────────────────────────────────────────── -->
+            <div class="stats-tables-grid">
+
+                <!-- Mejores promedios -->
+                <div class="panel stats-table-panel">
+                    <h3>Mejores promedios</h3>
+                    <p class="panel-sub" style="margin:0 0 14px;font-size:12px;color:var(--muted);">
+                        Alumnos con mayor promedio general entre todas las materias evaluadas
+                    </p>
+                    <div class="data-table-wrap" style="margin-top:0;">
+                        <table class="stats-inner-table" id="topStudentsTable">
+                            <thead>
+                                <tr><th>#</th><th>Alumno</th><th>Curso</th><th>Promedio</th><th>Materias</th></tr>
+                            </thead>
+                            <tbody id="topStudentsBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Detalle por curso -->
+                <div class="panel stats-table-panel">
+                    <h3>Detalle por curso</h3>
+                    <p class="panel-sub" style="margin:0 0 14px;font-size:12px;color:var(--muted);">
+                        Resumen de rendimiento académico por división
+                    </p>
+                    <div class="data-table-wrap" style="margin-top:0;">
+                        <table class="stats-inner-table" id="courseDetailTable">
+                            <thead>
+                                <tr><th>Curso</th><th>Alumnos</th><th>Promedio</th><th>% Aprobados</th></tr>
+                            </thead>
+                            <tbody id="courseDetailBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Detalle por materia -->
+                <div class="panel stats-table-panel" style="grid-column: 1 / -1;">
+                    <h3>Detalle por materia</h3>
+                    <p class="panel-sub" style="margin:0 0 14px;font-size:12px;color:var(--muted);">
+                        Estadísticas completas por área curricular
+                    </p>
+                    <div class="data-table-wrap" style="margin-top:0;">
+                        <table class="stats-inner-table" id="subjectDetailTable">
+                            <thead>
+                                <tr>
+                                    <th>Materia</th>
+                                    <th>Registros</th>
+                                    <th>Promedio</th>
+                                    <th>Aprobados</th>
+                                    <th>Desaprobados</th>
+                                    <th>% Aprobados</th>
+                                </tr>
+                            </thead>
+                            <tbody id="subjectDetailBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- Error state -->
+        <div id="statsError" class="hidden" style="padding:40px;text-align:center;color:var(--danger);"></div>
+    </main>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+    <script src="firebase-config.js"></script>
+    <script src="auth.js"></script>
+    <script src="db.js"></script>
+    <script src="ganso-log.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+    <script src="estadisticas.js"></script>
+</body>
+</html>

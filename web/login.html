@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="author" content="Eliseo Ignacio Pérez de Villarreal">
+    <meta name="description" content="Sistema académico institucional multiplataforma para gestión de notas, boletines y sincronización escolar.">
+    <title>Ingresar — Ganso-Paralelo</title>
+    <link rel="icon" href="logos/favicon.ico" sizes="any">
+    <link rel="icon" href="logos/favicon.svg" type="image/svg+xml">
+    <link rel="icon" type="image/png" sizes="96x96" href="logos/favicon-96x96.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="logos/favicon-32x32.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="logos/apple-touch-icon.png">
+    <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
+    <link rel="preconnect" href="https://apis.google.com" crossorigin>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="auth-body">
+    <div class="auth-wrap">
+        <div class="auth-hero">
+            <img src="logos/web-app-manifest-512x512.png" alt="Ganso-Paralelo" class="auth-hero-img">
+        </div>
+        <div class="auth-card">
+            <div class="auth-brand">
+                <h1 class="auth-title">Ganso-Paralelo</h1>
+                <p class="auth-subtitle">Sistema institucional de gestión de notas</p>
+            </div>
+
+            <div class="notice error hidden" id="loginError">
+                <strong id="loginErrorText"></strong>
+            </div>
+
+            <form id="loginForm" autocomplete="on" novalidate>
+                <label>
+                    Correo electrónico
+                    <input id="emailInput" type="email" placeholder="usuario@colegio.edu"
+                            required autocomplete="email" inputmode="email">
+                </label>
+                <label>
+                    Contraseña
+                    <div class="password-wrap">
+                        <input id="passwordInput" type="password" placeholder="••••••••"
+                                required autocomplete="current-password">
+                        <button type="button" class="toggle-pass" id="togglePassword"
+                                aria-label="Mostrar contraseña" tabindex="-1">
+                            <svg id="eyeIcon" width="18" height="18" viewBox="0 0 24 24" fill="none"
+                                stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                                <circle cx="12" cy="12" r="3"/>
+                            </svg>
+                        </button>
+                    </div>
+                </label>
+                <button class="primary-button full" id="loginButton" type="submit">Ingresar</button>
+                <button type="button" class="link-button" id="forgotPassBtn">¿Olvidaste tu contraseña?</button>
+            </form>
+
+            <p class="auth-footer">Si no tenés acceso, contactá al administrador del sistema.</p>
+        </div>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+    <script src="firebase-config.js"></script>
+    <script>
+        const $ = id => document.getElementById(id);
+        const loginForm    = $('loginForm');
+        const emailInput   = $('emailInput');
+        const passwordInput= $('passwordInput');
+        const loginButton  = $('loginButton');
+        const loginError   = $('loginError');
+        const loginErrText = $('loginErrorText');
+        const toast        = $('toast');
+        let toastTimer;
+
+        function showToast(msg) {
+            clearTimeout(toastTimer);
+            toast.textContent = msg;
+            toast.classList.add('visible');
+            toastTimer = setTimeout(() => toast.classList.remove('visible'), 3000);
+        }
+
+        function showError(msg, focusEl) {
+            loginErrText.textContent = msg;
+            loginError.classList.remove('hidden');
+            if (focusEl) { focusEl.select(); focusEl.focus(); }
+        }
+        function hideError() { loginError.classList.add('hidden'); }
+        function setLoading(v) { loginButton.disabled = v; loginButton.textContent = v ? 'Ingresando...' : 'Ingresar'; }
+
+        $('togglePassword').addEventListener('click', () => {
+            const isHidden = passwordInput.type === 'password';
+            passwordInput.type = isHidden ? 'text' : 'password';
+            $('togglePassword').setAttribute('aria-label', isHidden ? 'Ocultar contraseña' : 'Mostrar contraseña');
+            $('eyeIcon').innerHTML = isHidden
+                ? '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>'
+                : '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
+        });
+
+        // Ocultar el error cuando el usuario empieza a escribir
+        emailInput.addEventListener('input', hideError);
+        passwordInput.addEventListener('input', hideError);
+
+        $('forgotPassBtn').addEventListener('click', async () => {
+            const email = emailInput.value.trim();
+            if (!email) {
+                showError('Ingresá tu correo electrónico para recuperar la contraseña.', emailInput);
+                return;
+            }
+            const btn = $('forgotPassBtn');
+            btn.disabled = true;
+            btn.textContent = 'Enviando…';
+            try {
+                await firebase.auth().sendPasswordResetEmail(email);
+                hideError();
+                showToast('Se envió un correo para restablecer tu contraseña. Revisá tu bandeja.');
+            } catch(err) {
+                const msgs = {
+                    'auth/user-not-found':        'No existe ninguna cuenta con ese correo.',
+                    'auth/invalid-email':         'El correo no tiene un formato válido.',
+                    'auth/too-many-requests':     'Demasiados intentos. Esperá unos minutos.',
+                    'auth/network-request-failed':'Sin conexión. Verificá tu internet e intentá de nuevo.'
+                };
+                showError(msgs[err.code] || 'No se pudo enviar el correo. Intentá de nuevo.', emailInput);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '¿Olvidaste tu contraseña?';
+            }
+        });
+
+        function redirectByRole(role) {
+            window.location.href = role === 'admin' ? 'admin.html' : 'index.html';
+        }
+
+        // Siempre cerrar sesión al mostrar login (Electron, web y APK).
+        // Firebase LOCAL persistence mantiene la sesión entre reinicios del proceso,
+        // por lo que hay que hacer signOut explícito para forzar re-login siempre.
+        try { firebase.auth().signOut().catch(() => {}); } catch(_) {}
+
+        loginForm.addEventListener('submit', async e => {
+            e.preventDefault();
+            const email    = emailInput.value.trim();
+            const password = passwordInput.value;
+
+            if (!email || !password) {
+                showError('Completá el correo y la contraseña.');
+                return;
+            }
+
+            setLoading(true);
+            hideError();
+
+            try {
+                const cred = await firebase.auth().signInWithEmailAndPassword(email, password);
+                sessionStorage.setItem('gp_authenticated', '1');
+                const doc  = await firebase.firestore().collection('users').doc(cred.user.uid).get();
+                redirectByRole(doc.exists ? doc.data().role : 'profesor');
+            } catch (err) {
+                setLoading(false);
+                const errores = {
+                    'auth/user-not-found':        'No existe ninguna cuenta con ese correo electrónico.',
+                    'auth/wrong-password':        'La contraseña es incorrecta. Revisala y volvé a intentar.',
+                    'auth/invalid-email':         'El correo no tiene un formato válido.',
+                    'auth/invalid-credential':    'El correo o la contraseña son incorrectos.',
+                    'auth/too-many-requests':     'Demasiados intentos fallidos. Esperá unos minutos antes de volver a intentar.',
+                    'auth/network-request-failed':'Sin conexión. Verificá tu internet e intentá de nuevo.',
+                    'auth/user-disabled':         'Esta cuenta fue desactivada. Contactá al administrador.'
+                };
+                const msg = errores[err.code] || `Error al ingresar (${err.code || 'desconocido'}). Intentá de nuevo.`;
+                // Si es error de contraseña, poner foco en ese campo
+                const focusEl = (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential')
+                    ? passwordInput : null;
+                showError(msg, focusEl);
+                console.error('Login error:', err.code, err.message);
+            }
+        });
+    </script>
+</body>
+</html>
