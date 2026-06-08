@@ -90,7 +90,7 @@ function startServer() {
             res.setHeader('X-Frame-Options', 'SAMEORIGIN');
             res.setHeader('Content-Security-Policy',
                 "default-src 'self' 127.0.0.1:3737; " +
-                "script-src 'self' https://www.gstatic.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; " +
+                "script-src 'self' 'unsafe-inline' https://www.gstatic.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; " +
                 "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com; " +
                 "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
                 "font-src 'self' https://fonts.gstatic.com; " +
@@ -292,7 +292,7 @@ app.whenReady().then(() => {
                 try {
                     if (typeof hasData === 'function' && hasData()) {
                         if (typeof saveLocalState === 'function') saveLocalState(false);
-                        if (typeof flushFirestoreSave === 'function') flushFirestoreSave();
+                        if (typeof SyncModule !== 'undefined' && SyncModule.flush) SyncModule.flush();
                     }
                 } catch(_) {}
                 return true;
