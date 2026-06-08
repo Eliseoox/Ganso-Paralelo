@@ -40,9 +40,7 @@
     }
 
     function computeAvg(grades, cols) {
-        const vals = cols.map(c => parseFloat(grades?.[c])).filter(v => !isNaN(v) && v >= 0);
-        if (!vals.length) return null;
-        return vals.reduce((a, b) => a + b, 0) / vals.length;
+        return Utils.calculateAverage(cols.map(c => grades?.[c]));
     }
 
     function getSessionInst() {
@@ -144,6 +142,9 @@
             (b.updatedAt || '').localeCompare(a.updatedAt || '')
         );
 
+        // Overrides unificados de todos los docs para este curso
+        const overrides = getUnifiedCourseOverrides(course);
+
         for (const doc of sorted) {
             const recs = doc.records?.[course];
             if (!recs || typeof recs !== 'object') continue;
@@ -158,14 +159,14 @@
                 ? enrolled
                 : Object.keys(recs);
             const valid = names.filter(s => typeof s === 'string' && s.trim());
-            if (valid.length > 0) return [...valid].sort();
+            if (valid.length > 0) return applyOverridesToList(valid, overrides);
         }
 
         // Fallback inicio de año (ninguna materia tiene notas aún):
         // usar el doc con la lista de alumnos más reciente
         for (const doc of sorted) {
             const arr = doc.students?.[course];
-            if (Array.isArray(arr) && arr.length > 0) return [...arr].sort();
+            if (Array.isArray(arr) && arr.length > 0) return applyOverridesToList([...arr], overrides);
         }
 
         return [];
@@ -228,13 +229,42 @@
                 if (localTs > 0 && remoteTs > 0 && localTs < remoteTs) return;
                 subjectDataArray[idx] = {
                     ...subjectDataArray[idx],
-                    records:      local.records,
-                    students:     local.students     || subjectDataArray[idx].students,
-                    gradeColumns: local.gradeColumns || subjectDataArray[idx].gradeColumns,
-                    updatedAt:    local.updatedAt    || subjectDataArray[idx].updatedAt,
+                    records:          local.records,
+                    students:         local.students         || subjectDataArray[idx].students,
+                    gradeColumns:     local.gradeColumns     || subjectDataArray[idx].gradeColumns,
+                    updatedAt:        local.updatedAt        || subjectDataArray[idx].updatedAt,
+                    studentOverrides: local.studentOverrides || subjectDataArray[idx].studentOverrides,
                 };
             } catch (_) {}
         });
+    }
+
+    // Retorna los removals y additions unificados de todos los docs para un curso dado.
+    function getUnifiedCourseOverrides(course) {
+        const removalSet  = new Set();
+        const additionSeen = new Set();
+        const additionList = [];
+        allSubjectData.forEach(doc => {
+            (doc.studentOverrides?.removals?.[course] || []).forEach(s => removalSet.add(s.toLowerCase()));
+            (doc.studentOverrides?.additions?.[course] || []).forEach(s => {
+                const key = s.toLowerCase();
+                if (!additionSeen.has(key)) { additionSeen.add(key); additionList.push(s); }
+            });
+        });
+        return {
+            removalSet,
+            additions: additionList.filter(s => !removalSet.has(s.toLowerCase())),
+        };
+    }
+
+    // Aplica overrides a una lista de alumnos ya filtrada.
+    function applyOverridesToList(students, overrides) {
+        const result = students.filter(s => !overrides.removalSet.has(s.toLowerCase()));
+        const existingKeys = new Set(result.map(s => s.toLowerCase()));
+        overrides.additions.forEach(s => {
+            if (!existingKeys.has(s.toLowerCase())) { result.push(s); existingKeys.add(s.toLowerCase()); }
+        });
+        return result.sort();
     }
 
     // Refrescar automáticamente cuando la pestaña vuelve a estar activa
@@ -324,12 +354,7 @@
     }
 
     async function downloadAllPDF(course) {
-        const studentsSet = new Set();
-        allSubjectData.forEach(doc => {
-            const recs = doc.records?.[course];
-            if (recs) Object.keys(recs).forEach(s => studentsSet.add(s));
-        });
-        const students = [...studentsSet].sort().filter(name => buildBoletinData(course, name).subjects.length > 0);
+        const students = getStudentsForCourse(course).filter(name => buildBoletinData(course, name).subjects.length > 0);
 
         if (!students.length) { showToast('Sin alumnos con notas en este curso.'); return; }
 
@@ -393,9 +418,9 @@
             });
         });
 
-        // Trayectoria general: se basa en el promedio de todos los promedios
+        // Trayectoria general: promedio de los promedios por materia, redondeado igual que el editor
         const validAvgs  = subjects.map(s => s.avg).filter(a => a !== null);
-        const overallAvg = validAvgs.length ? validAvgs.reduce((a, b) => a + b, 0) / validAvgs.length : null;
+        const overallAvg = validAvgs.length ? Utils.calculateAverage(validAvgs) : null;
         const overallTray = Utils.computeTrajectory(overallAvg, { teaMin: getTeaMin(), tepMin: getTepMin() }) || null;
 
         return { subjects, overallTray, studentNumber, ...cfg };

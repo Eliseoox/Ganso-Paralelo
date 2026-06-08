@@ -133,8 +133,15 @@
             const isEditing = _fsWriteTimer !== null || _fsPendingSnap !== null || _fsRetryTimer !== null || hasFocusedInput;
             if (!isEditing) {
                 if (typeof GansoLog !== "undefined") GansoLog.REMOTE_APPLIED({ subject: remoteData.subject, remoteTs, localTs });
+                // Preservar overrides locales antes de reemplazar el estado con el remoto.
+                // Si no los fusionamos, un update de otra pestaña/dispositivo que no incluya
+                // studentOverrides borraría las bajas/altas manuales del usuario actual.
+                const prevOverrides = cloneData(appState.studentOverrides || { additions: {}, removals: {} });
                 const prevCourse = selectedCourse;
                 loadStateFromSnapshot(remoteData);
+                // Fusionar overrides locales con los del doc remoto, luego re-aplicar
+                const mergedOverrides = Utils.mergeOverrides(prevOverrides, appState.studentOverrides || { additions: {}, removals: {} });
+                applyStudentOverrides(appState, mergedOverrides);
                 if (appState.courses.includes(prevCourse)) selectedCourse = prevCourse;
                 hydrateControls(); renderAll(); renderSavedSession(); renderFlow(); updateDisabledState();
                 try {

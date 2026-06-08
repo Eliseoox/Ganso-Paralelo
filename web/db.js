@@ -193,10 +193,22 @@
                 newStudents.forEach((s, i) => {
                     if (newCourseRecords[s]) newCourseRecords[s].number = i + 1;
                 });
+                // Actualizar studentOverrides: agregar a additions, quitar de removals
+                const curOverrides  = data.studentOverrides || { additions: {}, removals: {} };
+                const curAdditions  = Array.isArray(curOverrides.additions?.[course]) ? [...curOverrides.additions[course]] : [];
+                const curRemovals   = Array.isArray(curOverrides.removals?.[course])  ? [...curOverrides.removals[course]]  : [];
+                if (!curAdditions.some(s => s.toLowerCase() === nameLower)) curAdditions.push(studentName);
+                const newRemovals   = curRemovals.filter(s => s.toLowerCase() !== nameLower);
+                const newOverrides  = {
+                    ...curOverrides,
+                    additions: { ...curOverrides.additions, [course]: curAdditions },
+                    removals:  { ...curOverrides.removals,  [course]: newRemovals  },
+                };
                 batch.update(doc.ref, {
-                    students: { ...data.students, [course]: newStudents },
-                    records:  { ...data.records,  [course]: newCourseRecords },
-                    updatedAt: new Date().toISOString()
+                    students:         { ...data.students, [course]: newStudents },
+                    records:          { ...data.records,  [course]: newCourseRecords },
+                    studentOverrides: newOverrides,
+                    updatedAt:        new Date().toISOString()
                 });
                 count++;
             });
@@ -213,21 +225,44 @@
             let count = 0;
             snap.docs.forEach(doc => {
                 const data = doc.data();
+                // Procesar todos los docs que tengan el curso (aunque el alumno no esté en students)
+                const hasCourse = (data.courses || []).includes(course) ||
+                                  Object.keys(data.students || {}).includes(course);
+                if (!hasCourse) return;
+
+                // Actualizar studentOverrides: agregar a removals, quitar de additions
+                const curOverrides = data.studentOverrides || { additions: {}, removals: {} };
+                const curAdditions = Array.isArray(curOverrides.additions?.[course]) ? [...curOverrides.additions[course]] : [];
+                const curRemovals  = Array.isArray(curOverrides.removals?.[course])  ? [...curOverrides.removals[course]]  : [];
+                const newAdditions = curAdditions.filter(s => s.toLowerCase() !== nameLower);
+                if (!curRemovals.some(s => s.toLowerCase() === nameLower)) curRemovals.push(studentName);
+                const newOverrides = {
+                    ...curOverrides,
+                    additions: { ...curOverrides.additions, [course]: newAdditions },
+                    removals:  { ...curOverrides.removals,  [course]: curRemovals  },
+                };
+
+                const updateData = {
+                    studentOverrides: newOverrides,
+                    updatedAt:        new Date().toISOString(),
+                };
+
+                // Si el alumno está en la lista, también removerlo de students y records
                 const currentStudents = data.students?.[course] || [];
                 const match = currentStudents.find(s => s.toLowerCase() === nameLower);
-                if (!match) return;
-                const newStudents = currentStudents.filter(s => s.toLowerCase() !== nameLower);
-                const newCourseRecords = { ...(data.records?.[course] || {}) };
-                delete newCourseRecords[match];
-                // Renumerar tras eliminación
-                newStudents.forEach((s, i) => {
-                    if (newCourseRecords[s]) newCourseRecords[s].number = i + 1;
-                });
-                batch.update(doc.ref, {
-                    students: { ...data.students, [course]: newStudents },
-                    records:  { ...data.records,  [course]: newCourseRecords },
-                    updatedAt: new Date().toISOString()
-                });
+                if (match) {
+                    const newStudents = currentStudents.filter(s => s.toLowerCase() !== nameLower);
+                    const newCourseRecords = { ...(data.records?.[course] || {}) };
+                    delete newCourseRecords[match];
+                    // Renumerar tras eliminación
+                    newStudents.forEach((s, i) => {
+                        if (newCourseRecords[s]) newCourseRecords[s].number = i + 1;
+                    });
+                    updateData.students = { ...data.students, [course]: newStudents };
+                    updateData.records  = { ...data.records,  [course]: newCourseRecords };
+                }
+
+                batch.update(doc.ref, updateData);
                 count++;
             });
             await batch.commit();
@@ -305,6 +340,7 @@
 
             await fs().collection('subjectData').doc(id).set({
                 institutionId, subject, courses, students, records,
+                studentOverrides: { additions: {}, removals: {} },
                 locked: false, lockedBy: null, lockedByName: null, lockedAt: null,
                 updatedAt: new Date().toISOString(),
                 lastSavedAt: new Date().toLocaleDateString('es-AR')

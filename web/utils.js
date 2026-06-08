@@ -33,7 +33,44 @@
         return "TED";
     }
 
-    const utils = { parseGrade, calculateAverage, computeTrajectory };
+    // Fusiona dos objetos de studentOverrides sin duplicar (case-insensitive).
+    // Regla: si un alumno aparece en removals de cualquiera de los dos, gana la baja.
+    function mergeOverrides(a, b) {
+        const aAdd = (a && a.additions) ? a.additions : {};
+        const bAdd = (b && b.additions) ? b.additions : {};
+        const aRem = (a && a.removals)  ? a.removals  : {};
+        const bRem = (b && b.removals)  ? b.removals  : {};
+
+        const courses = new Set([
+            ...Object.keys(aAdd), ...Object.keys(aRem),
+            ...Object.keys(bAdd), ...Object.keys(bRem),
+        ]);
+
+        const result = { additions: {}, removals: {} };
+        courses.forEach(course => {
+            const remSeen = new Set();
+            const remList = [];
+            [...(aRem[course] || []), ...(bRem[course] || [])].forEach(s => {
+                const key = s.toLowerCase();
+                if (!remSeen.has(key)) { remSeen.add(key); remList.push(s); }
+            });
+
+            const addSeen = new Set();
+            const addList = [];
+            [...(aAdd[course] || []), ...(bAdd[course] || [])].forEach(s => {
+                const key = s.toLowerCase();
+                if (!addSeen.has(key) && !remSeen.has(key)) {
+                    addSeen.add(key); addList.push(s);
+                }
+            });
+
+            if (remList.length) result.removals[course] = remList;
+            if (addList.length) result.additions[course] = addList;
+        });
+        return result;
+    }
+
+    const utils = { parseGrade, calculateAverage, computeTrajectory, mergeOverrides };
 
     // Node.js / Vitest (CJS interop)
     if (typeof module !== "undefined" && module.exports) {

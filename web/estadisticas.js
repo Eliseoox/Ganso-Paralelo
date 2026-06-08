@@ -57,9 +57,7 @@
     }
 
     function computeAvg(grades, cols) {
-        const vals = cols.map(c => parseFloat(grades?.[c])).filter(v => !isNaN(v) && v >= 0);
-        if (!vals.length) return null;
-        return vals.reduce((a, b) => a + b, 0) / vals.length;
+        return Utils.calculateAverage(cols.map(c => grades?.[c]));
     }
 
     function getSessionInst() {
@@ -186,10 +184,11 @@
                 if (localTs > 0 && remoteTs > 0 && localTs < remoteTs) return;
                 subjectDataArray[idx] = {
                     ...subjectDataArray[idx],
-                    records:      local.records,
-                    students:     local.students      || subjectDataArray[idx].students,
-                    gradeColumns: local.gradeColumns  || subjectDataArray[idx].gradeColumns,
-                    updatedAt:    local.updatedAt     || subjectDataArray[idx].updatedAt,
+                    records:          local.records,
+                    students:         local.students         || subjectDataArray[idx].students,
+                    gradeColumns:     local.gradeColumns     || subjectDataArray[idx].gradeColumns,
+                    updatedAt:        local.updatedAt        || subjectDataArray[idx].updatedAt,
+                    studentOverrides: local.studentOverrides || subjectDataArray[idx].studentOverrides,
                 };
             } catch (_) {}
         });
@@ -201,6 +200,17 @@
         const courseStats  = {};     // { course:  {total,passed,failed,avgSum,studentsSet} }
         const studentMap   = {};     // { `${course}:${name}`: {course,name,avgSum,count,subjects[]} }
         let gTotal = 0, gPassed = 0, gAvgSum = 0;
+
+        // Pre-calcular removals unificados por curso (union de todos los docs)
+        // para que alumnos dados de baja no aparezcan en ningún cómputo.
+        const unifiedRemovals = {};
+        FIXED_COURSES.forEach(course => {
+            const remSet = new Set();
+            allSubjectData.forEach(doc => {
+                (doc.studentOverrides?.removals?.[course] || []).forEach(s => remSet.add(s.toLowerCase()));
+            });
+            unifiedRemovals[course] = remSet;
+        });
 
         allSubjectData.forEach(doc => {
             const subjectName = doc.subject;
@@ -216,12 +226,15 @@
                 const students = doc.students?.[course] || [];
                 const records  = doc.records?.[course]  || {};
                 const cols     = doc.gradeColumns?.[course] || GRADE_COLS_DEF;
+                const removals = unifiedRemovals[course];
 
                 if (!courseStats[course]) {
                     courseStats[course] = { total: 0, passed: 0, failed: 0, avgSum: 0, studentsSet: new Set() };
                 }
 
                 students.forEach(studentName => {
+                    // Excluir alumnos dados de baja vía override
+                    if (removals.has(studentName.toLowerCase())) return;
                     const record = records[studentName];
                     if (!record) return;
                     const avg = computeAvg(record.grades, cols);
