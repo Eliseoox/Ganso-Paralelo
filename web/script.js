@@ -28,16 +28,7 @@ let savedSnapshot    = null;
 let toastTimer       = 0;
 let isSaving         = false;
 let dbPendingData    = null;
-let _fsWriteTimer    = null;
-let _fsPendingSnap   = null;
-const FS_DEBOUNCE_MS  = 300;
-const FS_MAX_RETRIES  = 3;
-
-// Real-time listener (onSnapshot)
-let _fsListener       = null;   // unsubscribe function returned by onSnapshot
-let _lastOwnUpdatedAt = null;   // exact updatedAt ISO string we last wrote to Firestore (echo detection)
-let _listenerFirst    = true;   // skip the first snapshot (already loaded via get() in confirmSubject)
-let _fsRetryTimer     = null;   // setTimeout handle for Firestore retry after network failure
+// Sync state moved to SyncModule (web/modules/sync.js)
 
 // Estado institucional (Firebase)
 let institutionId    = "";
@@ -48,9 +39,7 @@ let canUserEdit      = true;
 let lockState        = { locked: false, lockedBy: null, lockedByName: null };
 let firebaseMode     = false;
 let _lastExportData      = null;   // { data: Uint8Array, fileName: string } — para compartir post-export
-let _electronMailCfg     = null;   // config pública cacheada del servidor de correo (.exe)
-let _historyDisplayRows  = null;   // rows cargados desde Firestore para el modal de historial
-let _historyModalOpen    = false;  // guard para descartar fetches que llegan tras cerrar el modal
+// _electronMailCfg  → EmailModule  |  _historyDisplayRows/_historyModalOpen → HistoryModule
 
 const elements = {};
 
@@ -117,7 +106,7 @@ function startApp() {
     seedDemoDataIfNeeded();
     savedSnapshot = readLocalSnapshot();
     initializePage();
-    if (navigator.userAgent.includes("Electron")) fetchElectronMailCfg();
+    if (navigator.userAgent.includes("Electron")) EmailModule.fetchConfig();
     // Allow intentional navigation (header links) to bypass the beforeunload guard.
     // Data is always auto-saved to localStorage so nothing is lost.
     document.querySelectorAll("a.nav-button[href]").forEach(link => {
@@ -125,14 +114,14 @@ function startApp() {
             window._gansoNavAway = true;
             if (hasData()) {
                 try { saveLocalState(false); } catch(_) {}
-                flushFirestoreSave(); // enviar el write pendiente antes de navegar
+                SyncModule.flush(); // enviar el write pendiente antes de navegar
             }
         });
     });
     window.addEventListener("beforeunload", e => {
         if (hasData()) {
             try { saveLocalState(false); } catch(_) {}
-            flushFirestoreSave();
+            SyncModule.flush();
         }
         if (window._gansoLogout || window._gansoNavAway || !hasData()) return;
         e.preventDefault();
@@ -149,7 +138,7 @@ function startApp() {
         // When reconnecting, flush any localStorage-only state to Firestore.
         if (firebaseMode && institutionId && appState.subject && hasData()) {
             setSyncStatus("Reconectado — guardando...", "pending");
-            scheduleFirestoreSave(createSnapshot());
+            SyncModule.schedule(createSnapshot());
         } else {
             setSyncStatus("Conectado", "online");
         }
@@ -278,20 +267,20 @@ function bindEvents() {
     on(elements.continueSavedButton, "click", continueFromSaved);
     on(elements.startNewButton, "click", startNewSession);
     on(elements.openWorkbookButton, "click", openWorkbook);
-    on(elements.workbookInput, "change", importWorkbookFromInput);
+    on(elements.workbookInput, "change", ExcelModule.importFromInput);
     on(elements.loadFromDbButton, "click", loadFromDbButton_click);
     on(elements.dismissDbDataBtn, "click", () => {
         if (elements.dbDataBox) elements.dbDataBox.classList.add("hidden");
         dbPendingData = null;
     });
-    on(elements.backupButton, "click", () => { closeHeaderTools(); downloadBackup(); });
-    on(elements.backupButtonSecondary, "click", downloadBackup);
-    on(elements.clearAllButton, "click", () => { closeHeaderTools(); clearAllData(); });
+    on(elements.backupButton, "click", () => { closeHeaderTools(); BackupModule.download(); });
+    on(elements.backupButtonSecondary, "click", () => BackupModule.download());
+    on(elements.clearAllButton, "click", () => { closeHeaderTools(); BackupModule.clearAll(); });
     on(elements.logoutButton, "click", handleLogout);
     on(elements.goReviewButton, "click", () => setActiveStep(4));
     on(elements.backToEditButton, "click", () => setActiveStep(3));
     on(elements.exportExcelButton, "click", exportFinalExcel);
-    on(elements.restoreInput,  "change", importRestoreBackup);
+    on(elements.restoreInput,  "change", BackupModule.importRestore);
     on(elements.restoreButton, "click",  () => { closeHeaderTools(); elements.restoreInput?.click(); });
 
     document.querySelectorAll("[data-go-step]").forEach(btn => {
@@ -317,9 +306,9 @@ function bindEvents() {
     on(elements.addColCtaBtn, "click", openAddGradeColModal);
     on(elements.generateSampleBtn, "click", generateSampleData);
 
-    on(elements.openHistoryBtn,      "click", openHistoryModal);
-    on(elements.closeHistoryBtn,     "click", closeHistoryModal);
-    on(elements.historySearch,       "input", filterHistoryModal);
+    on(elements.openHistoryBtn,      "click", HistoryModule.openModal);
+    on(elements.closeHistoryBtn,     "click", HistoryModule.closeModal);
+    on(elements.historySearch,       "input", HistoryModule.filterModal);
     on(elements.saveStudentExtrasBtn,"click", saveStudentExtras);
 
     on(elements.restoreAutoBackupButton, "click", () => { closeHeaderTools(); restoreAutoBackup(); });
@@ -403,12 +392,12 @@ function restorePanelState() {
 }
 
 async function handleLogout() {
-    detachSubjectListener();
+    SyncModule.detach();
     commitFocusedGradeInput();
     window._gansoLogout = true;
     // Cancelar write con debounce pendiente y hacer un save explícito y síncrono
     // antes de cerrar la sesión, para garantizar que todos los datos llegaron a Firestore.
-    cancelFirestoreSave();
+    SyncModule.cancel();
     if (firebaseMode && institutionId && appState.subject && hasData() && typeof DB !== "undefined") {
         if (elements.logoutButton) {
             elements.logoutButton.disabled = true;
@@ -417,7 +406,7 @@ async function handleLogout() {
         try {
             const snap = createSnapshot();
             const updatedAt = new Date().toISOString();
-            _lastOwnUpdatedAt = updatedAt;
+            SyncModule.setLastOwnUpdatedAt(updatedAt);
             await DB.saveSubjectData(institutionId, appState.subject, snap, updatedAt);
         } catch (_) {}
     }
@@ -487,7 +476,7 @@ async function confirmSubject(event) {
     let dataReadyFromLocal = false;
     if (switchingSubject) {
         // Flush old subject: cancel debounce and do an explicit Firestore save (only if data exists).
-        cancelFirestoreSave();
+        SyncModule.cancel();
         if (firebaseMode && institutionId && hasData() && typeof DB !== "undefined") {
             try { await DB.saveSubjectData(institutionId, prevSubject, createSnapshot()); } catch (_) {}
         }
@@ -527,7 +516,7 @@ async function confirmSubject(event) {
         // Enganchar listener en tiempo real para este documento.
         // Se llama ANTES del get() inicial; el primer disparo del listener
         // es ignorado (_listenerFirst) para no duplicar la carga ya hecha abajo.
-        attachSubjectListener(subject);
+        SyncModule.attach(subject);
         setSyncStatus("Buscando en el sistema...", "pending");
 
         DB.getSubjectMeta(institutionId, subject)
@@ -589,7 +578,7 @@ async function confirmSubject(event) {
                     localStorage.setItem(storageKey(appState.subject), JSON.stringify(snap));
                     if (appState.subject) localStorage.setItem(lastSubjectKey(), appState.subject);
                     savedSnapshot = snap;
-                    if (dbData.updatedAt) _lastOwnUpdatedAt = dbData.updatedAt;
+                    if (dbData.updatedAt) SyncModule.setLastOwnUpdatedAt(dbData.updatedAt);
                 } catch(_) {}
                 setSyncStatus("Datos del sistema cargados", "online");
                 updateNotice("ready", `${subject} — datos cargados.`, "Podés comenzar a cargar notas.");
@@ -619,7 +608,7 @@ function showDbDataBox(dbData) {
     // A small or zero difference means another device may have saved after us.
     // IMPORTANT: do NOT re-upload local to Firestore here — that would overwrite remote changes.
     // Regular saves happen in saveLocalState() whenever the user edits anything.
-    const TRUST_LOCAL_DIFF_MS = 30_000;
+    const TRUST_LOCAL_DIFF_MS = 30000;
     if (localTs && cloudTs && localTs > cloudTs + TRUST_LOCAL_DIFF_MS) {
         setSyncStatus("Datos locales actualizados", "online");
         return;
@@ -640,7 +629,7 @@ function loadFromDbButton_click() {
     if (!dbPendingData) { showToast("Sin datos del sistema para cargar."); return; }
     // Cancelar write pendiente: los datos de Firebase son la fuente de verdad aquí,
     // no queremos que un save local viejo los sobreescriba después de la carga.
-    cancelFirestoreSave();
+    SyncModule.cancel();
     createPreOpBackup('load_from_db');
     // Preservar overrides e historial local antes de reemplazar con datos de Firebase
     const prevOverrides   = cloneData(appState.studentOverrides   || { additions: {}, removals: {} });
@@ -707,7 +696,7 @@ function continueFromSaved() {
         showToast("No hay datos guardados para continuar.");
         return;
     }
-    cancelFirestoreSave();
+    SyncModule.cancel();
     loadStateFromSnapshot(savedSnapshot);
     activeStep  = 3;
     hasReviewed = false;
@@ -718,8 +707,8 @@ function continueFromSaved() {
 }
 
 async function startNewSession() {
-    detachSubjectListener();
-    cancelFirestoreSave();
+    SyncModule.detach();
+    SyncModule.cancel();
     const currentSubject = elements.subjectInput?.value.trim() || appState.subject || "";
     if ((savedSnapshot && snapshotHasData(savedSnapshot)) || hasData()) {
         if (!await confirmDialog("Empezar nuevo borra los datos guardados en este navegador. El archivo original no se modifica.", { confirmText: "Sí, empezar nuevo", cancelText: "Cancelar" })) return;
@@ -747,285 +736,6 @@ async function startNewSession() {
 function openWorkbook() {
     if (isFlowPage() && !appState.subject) { showToast("Primero seleccioná una materia."); setActiveStep(1); return; }
     elements.workbookInput?.click();
-}
-
-async function importWorkbookFromInput(event) {
-    const [file] = event.target.files;
-    event.target.value = "";
-    if (!file) return;
-
-    if ((hasData() || snapshotHasData(savedSnapshot)) &&
-        !await confirmDialog("Cargar este Excel reemplaza los datos locales actuales.", { confirmText: "Sí, cargar", cancelText: "Cancelar" })) return;
-
-    try {
-        setSyncStatus("Validando Excel...", "pending");
-        const buffer   = await file.arrayBuffer();
-        const workbook = XLSX.read(buffer, { type: "array", cellDates: false });
-        const validation = validateWorkbook(workbook);
-        renderValidationMessages(validation);
-
-        if (validation.errors.length) {
-            setSyncStatus("Excel con errores", "error");
-            updateNotice("error", "El Excel no tiene la estructura esperada.", validation.errors[0]);
-            return;
-        }
-
-        const subject = appState.subject || elements.subjectInput?.value.trim() || "Sin materia";
-        // Cancelar write pendiente: el Excel es la nueva fuente de verdad y no queremos
-        // que datos viejos se suban a Firestore después de que el nuevo saveLocalState dispare.
-        cancelFirestoreSave();
-        createPreOpBackup('excel_import');
-        // Preservar overrides e historial local antes de reemplazar el estado con el Excel
-        const prevOverrides = cloneData(appState.studentOverrides   || { additions: {}, removals: {} });
-        const prevPending   = cloneData(appState.pendingHistoryRows || []);
-        appState      = readWorkbookState(workbook, file.name, subject, validation);
-        // Aplicar adiciones/eliminaciones manuales sobre los datos del Excel
-        applyStudentOverrides(appState, prevOverrides);
-        // Fusionar historial local con el historial del Excel, sin duplicar filas
-        appState.historyRows        = mergeHistoryRows(prevPending, appState.historyRows);
-        appState.pendingHistoryRows = cloneData(prevPending);
-        selectedCourse = appState.courses[0] || "";
-        activeStep    = 3;
-        hasReviewed   = false;
-        saveLocalState(false);
-        hydrateControls(); renderAll(); renderSavedSession(); renderFlow(); updateDisabledState();
-        setSyncStatus("Guardado local", "online");
-        updateNotice("ready", `Archivo cargado: ${file.name}`, "Podés continuar con la carga de notas.");
-        showToast("Excel cargado y validado.");
-    } catch (error) {
-        console.error(error);
-        setSyncStatus("Error al abrir", "error");
-        updateNotice("error", "No se pudo leer el Excel.", getErrorMessage(error, "Revisá el archivo e intentá de nuevo."));
-        showToast("No se pudo leer el Excel.");
-    }
-}
-
-
-// ── Importar backup JSON ──────────────────────────────────────────────────────
-async function importRestoreBackup(event) {
-    const [file] = event.target.files;
-    event.target.value = "";
-    if (!file) return;
-    try {
-        const text = await file.text();
-        const snapshot = JSON.parse(text);
-        if (!snapshot || !Array.isArray(snapshot.courses)) {
-            showToast("El archivo no es un backup válido.");
-            return;
-        }
-        const stats = getSnapshotStats(snapshot);
-        if (!await confirmDialog(`¿Restaurar este backup?\n\nMateria: ${snapshot.subject || "—"}\nCursos: ${stats.courses} | Alumnos: ${stats.students}\nGuardado: ${snapshot.lastSavedAt || "—"}\n\nLos datos actuales serán reemplazados.`, { confirmText: "Sí, restaurar", cancelText: "Cancelar" })) return;
-        cancelFirestoreSave();
-        createPreOpBackup('backup_restore');
-        loadStateFromSnapshot(snapshot);
-        selectedCourse = appState.courses[0] || "";
-        activeStep    = 3;
-        hasReviewed   = false;
-        saveLocalState(true);
-        hydrateControls(); renderAll(); renderSavedSession(); renderFlow(); updateDisabledState();
-        setSyncStatus("Backup restaurado", "online");
-        updateNotice("ready", "Backup restaurado.", "Los datos del backup están listos.");
-        showToast("Backup restaurado correctamente.");
-    } catch (_) {
-        showToast("No se pudo leer el archivo de backup. Verificá que sea un JSON válido.");
-    }
-}
-
-// ── Validación de Excel ───────────────────────────────────────────────────────
-function validateWorkbook(workbook) {
-    const result = { errors: [], warnings: [], sheets: [] };
-    const courseSheets = (workbook.SheetNames || []).filter(n => !isSystemSheet(n));
-    if (!courseSheets.length) {
-        result.errors.push("No se encontraron hojas de curso. Cada curso debe estar en una hoja propia.");
-        return result;
-    }
-    courseSheets.forEach(sheetName => {
-        const worksheet  = workbook.Sheets[sheetName];
-        const headerInfo = findHeaderRow(worksheet);
-        if (!headerInfo) { result.errors.push(`${sheetName}: no se encontró fila de encabezados.`); return; }
-        if (headerInfo.columns.Alumno === undefined) {
-            result.errors.push(`${sheetName}: no se encontró la columna "Alumno".`);
-            return;
-        }
-        const gradeCols = Object.keys(headerInfo.columns).filter(k => /^Nota \d+$/.test(k));
-        if (!gradeCols.length) result.warnings.push(`${sheetName}: no se encontraron columnas de notas; se usarán las columnas por defecto.`);
-        const missingOptional = OPTIONAL_IMPORT_HEADERS.filter(h => headerInfo.columns[h] === undefined);
-        if (missingOptional.length) result.warnings.push(`${sheetName}: se completarán al exportar: ${missingOptional.join(", ")}.`);
-        result.sheets.push({ name: sheetName, headerRow: headerInfo.row, columns: headerInfo.columns });
-    });
-    return result;
-}
-
-function findHeaderRow(worksheet) {
-    if (!worksheet || !worksheet["!ref"]) return null;
-    const range   = XLSX.utils.decode_range(worksheet["!ref"]);
-    const firstRow = Math.max(range.s.r, 0);
-    const lastRow  = Math.min(range.e.r, firstRow + 7);
-    let best = null;
-    for (let row = firstRow; row <= lastRow; row++) {
-        const columns = {};
-        for (let col = range.s.c; col <= range.e.c; col++) {
-            const canonical = canonicalHeader(getCellText(worksheet, row, col));
-            if (canonical && columns[canonical] === undefined) columns[canonical] = col;
-        }
-        const gradeCount = Object.keys(columns).filter(k => /^Nota \d+$/.test(k)).length;
-        const score = (columns.Alumno !== undefined ? 5 : 0) + gradeCount;
-        if (!best || score > best.score) best = { row, columns, score };
-    }
-    return best && best.score > 0 ? best : null;
-}
-
-function canonicalHeader(value) {
-    const key = normalizeHeader(value);
-    if (!key) return "";
-    const aliases = {
-        n:"N", nro:"N", numero:"N", no:"N",
-        alumno:"Alumno", alumna:"Alumno", estudiante:"Alumno", nombre:"Alumno", "nombre y apellido":"Alumno",
-        promedio:"Promedio",
-        "ultima actualizacion":"Ultima actualizacion", actualizacion:"Ultima actualizacion",
-        nota:"Nota 1"
-    };
-    if (aliases[key]) return aliases[key];
-    // Reconoce "Nota N" dinámicamente (cualquier número), con o sin espacio
-    const gradeMatch = key.match(/^nota\s*(\d+)$/);
-    if (gradeMatch) return `Nota ${gradeMatch[1]}`;
-    return "";
-}
-
-function readWorkbookState(workbook, fileName, subject, validation) {
-    const nextState = createInitialState(subject);
-    const warnings  = [...validation.warnings];
-    nextState.fileName = fileName || "notas_cursos.xlsx";
-    nextState.source   = "excel";
-
-    validation.sheets
-        .filter(si => !validation.errors.some(e => e.startsWith(`${si.name}:`)))
-        .forEach(sheetInfo => {
-            const fixedCourse = mapToFixedCourse(sheetInfo.name);
-            if (!fixedCourse) {
-                pushLimited(warnings, `Hoja "${sheetInfo.name}": no corresponde a ningún curso fijo; se omite.`);
-                return;
-            }
-            if ((nextState.students[fixedCourse] || []).length > 0) {
-                pushLimited(warnings, `Hoja "${sheetInfo.name}": ya se cargó el curso "${fixedCourse}"; se omite.`);
-                return;
-            }
-            const rows = readCourseRows(workbook.Sheets[sheetInfo.name], sheetInfo, warnings);
-            const students = [];
-            const records  = {};
-            const courseGradeColsSet = new Set();
-            const seen     = new Set();
-            rows.forEach(row => {
-                const key = row.student.toLocaleLowerCase();
-                if (seen.has(key)) { pushLimited(warnings, `${sheetInfo.name}: alumno duplicado omitido: ${row.student}.`); return; }
-                seen.add(key);
-                students.push(row.student);
-                if (row.gradeCols) row.gradeCols.forEach(c => courseGradeColsSet.add(c));
-                records[row.student] = {
-                    number: row.number || students.length,
-                    grades: row.grades,
-                    average: calculateAverage(Object.values(row.grades)),
-                    updatedAt: row.updatedAt || ""
-                };
-            });
-            if (!students.length) pushLimited(warnings, `${sheetInfo.name}: no se encontraron alumnos.`);
-            nextState.students[fixedCourse] = students;
-            nextState.records[fixedCourse]  = records;
-            const courseGradeCols = courseGradeColsSet.size
-                ? [...courseGradeColsSet].sort((a, b) => parseInt(a.replace("Nota ", "")) - parseInt(b.replace("Nota ", "")))
-                : [...GRADE_COLUMNS];
-            nextState.gradeColumns[fixedCourse] = courseGradeCols;
-        });
-
-    nextState.historyRows = readHistoryRows(workbook.Sheets[HISTORY_SHEET]);
-    nextState.validation  = { errors: [], warnings };
-    normalizeState(nextState);
-    return nextState;
-}
-
-function readCourseRows(worksheet, sheetInfo, warnings) {
-    if (!worksheet || !worksheet["!ref"]) return [];
-    const range = XLSX.utils.decode_range(worksheet["!ref"]);
-    const rows  = [];
-
-    // Columnas de nota ya detectadas por canonicalHeader
-    const knownNonGrade = new Set(["Alumno", "N", "Promedio", "Ultima actualizacion"]);
-    let sheetGradeCols = Object.keys(sheetInfo.columns)
-        .filter(k => /^Nota \d+$/.test(k))
-        .sort((a, b) => parseInt(a.replace("Nota ", "")) - parseInt(b.replace("Nota ", "")));
-
-    // Fallback: si no se detectaron columnas de nota, escanear el encabezado
-    // buscando columnas numéricas o con nombre "nota*" que el canonicalHeader no pudo mapear
-    if (!sheetGradeCols.length) {
-        let noteIdx = 1;
-        for (let ci = range.s.c; ci <= range.e.c; ci++) {
-            const hdr = normalizeHeader(getCellText(worksheet, sheetInfo.headerRow, ci));
-            if (!hdr) continue;
-            // Si ya está mapeado a un nombre canónico conocido, saltear
-            const canonical = canonicalHeader(getCellText(worksheet, sheetInfo.headerRow, ci));
-            if (canonical && knownNonGrade.has(canonical)) continue;
-            if (canonical && /^Nota \d+$/.test(canonical)) continue; // ya lo captura el camino normal
-            // Si el header parece una nota (contiene "nota" o es puramente numérico), asignarlo
-            if (/nota/.test(hdr) || /^\d+$/.test(hdr)) {
-                const key = `Nota ${noteIdx++}`;
-                sheetGradeCols.push(key);
-                sheetInfo.columns[key] = ci;
-            }
-        }
-    }
-
-    const effectiveCols = sheetGradeCols.length ? sheetGradeCols : [...GRADE_COLUMNS];
-
-    for (let ri = sheetInfo.headerRow + 1; ri <= range.e.r; ri++) {
-        const student = getCellText(worksheet, ri, sheetInfo.columns.Alumno).trim();
-        if (!student) continue;
-        const grades = {};
-        effectiveCols.forEach(col => {
-            const ci  = sheetInfo.columns[col];
-            if (ci === undefined || ci === null) { grades[col] = ""; return; }
-            const raw = getCellValue(worksheet, ri, ci);
-            const g   = normalizeGrade(raw);
-            if (raw !== "" && raw !== null && raw !== undefined && g === "") {
-                pushLimited(warnings, `${sheetInfo.name}: nota inválida en fila ${ri + 1}, ${col}; se dejó vacía.`);
-            }
-            grades[col] = g;
-        });
-        rows.push({
-            number: sheetInfo.columns.N === undefined ? rows.length + 1 : getCellValue(worksheet, ri, sheetInfo.columns.N),
-            student, grades, gradeCols: effectiveCols,
-            updatedAt: sheetInfo.columns["Ultima actualizacion"] === undefined
-                ? "" : getCellText(worksheet, ri, sheetInfo.columns["Ultima actualizacion"])
-        });
-    }
-    return rows;
-}
-
-function readHistoryRows(worksheet) {
-    if (!worksheet || !worksheet["!ref"]) return [];
-    const headerInfo = findHistoryHeaderRow(worksheet);
-    if (!headerInfo) return [];
-    const range = XLSX.utils.decode_range(worksheet["!ref"]);
-    const rows  = [];
-    for (let ri = headerInfo.row + 1; ri <= range.e.r; ri++) {
-        const row = HISTORY_HEADERS.map(h => {
-            const col = headerInfo.columns[h];
-            return col === undefined ? "" : getCellValue(worksheet, ri, col) ?? "";
-        });
-        if (row.some(v => String(v).trim() !== "")) rows.push(row);
-    }
-    return rows;
-}
-
-function findHistoryHeaderRow(worksheet) {
-    if (!worksheet || !worksheet["!ref"]) return null;
-    const range   = XLSX.utils.decode_range(worksheet["!ref"]);
-    const columns = {};
-    for (let col = range.s.c; col <= range.e.c; col++) {
-        const text   = normalizeHeader(getCellText(worksheet, range.s.r, col));
-        const header = HISTORY_HEADERS.find(h => normalizeHeader(h) === text);
-        if (header) columns[header] = col;
-    }
-    return Object.keys(columns).length ? { row: range.s.r, columns } : null;
 }
 
 // ── Hidratación de controles ──────────────────────────────────────────────────
@@ -1275,7 +985,7 @@ function commitFocusedGradeInput() {
     rec.average         = calculateAverage(Object.values(rec.grades));
     rec.trayectoria     = Utils.computeTrajectory(rec.average);
     rec.updatedAt       = now;
-    logHistoryEntry(action, course, student, column, oldGrade, nextGrade);
+    HistoryModule.log(action, course, student, column, oldGrade, nextGrade);
     focused.value = hasGrade(nextGrade) ? formatNumber(nextGrade) : "";
 }
 
@@ -1308,7 +1018,7 @@ function updateGradeFromInlineInput(input) {
     record.average         = calculateAverage(Object.values(record.grades));
     record.trayectoria     = Utils.computeTrajectory(record.average);
     record.updatedAt       = now;
-    logHistoryEntry(action, course, student, column, oldGrade, nextGrade);
+    HistoryModule.log(action, course, student, column, oldGrade, nextGrade);
     selectedCourse = course;
     selectStudent(student);
     saveStateAndRender(`${student}: ${column} actualizada.`);
@@ -1513,7 +1223,7 @@ function deleteSelectedGrade() {
     record.grades[column] = "";
     record.average        = calculateAverage(Object.values(record.grades));
     record.updatedAt      = now;
-    logHistoryEntry("Borrada", course, student, column, oldGrade, "");
+    HistoryModule.log("Borrada", course, student, column, oldGrade, "");
     saveStateAndRender(`${student}: ${column} borrada.`);
 }
 
@@ -1531,193 +1241,9 @@ function saveSelectedGrade(action) {
     record.grades[column] = grade;
     record.average        = calculateAverage(Object.values(record.grades));
     record.updatedAt      = now;
-    logHistoryEntry(action, course, student, column, hasGrade(oldGrade) ? oldGrade : "", grade);
+    HistoryModule.log(action, course, student, column, hasGrade(oldGrade) ? oldGrade : "", grade);
     elements.gradeInput.value = "";
     saveStateAndRender(`${student}: ${column} guardada.`);
-}
-
-// ── Historial ─────────────────────────────────────────────────────────────────
-function logHistoryEntry(action, course, student, column, oldGrade, newGrade) {
-    const now = formatDateTime(new Date());
-    const row = [now, action, course, student, column, hasGrade(oldGrade) ? oldGrade : "", hasGrade(newGrade) ? newGrade : ""];
-    appState.historyRows.push(row);
-    // También acumular en pendingHistoryRows para que sobreviva importaciones de Excel o Firebase
-    if (!Array.isArray(appState.pendingHistoryRows)) appState.pendingHistoryRows = [];
-    appState.pendingHistoryRows.push(row);
-    if (firebaseMode && institutionId && appState.subject && typeof DB !== "undefined") {
-        DB.logHistory(institutionId, appState.subject, {
-            action, course, student, column,
-            oldValue: hasGrade(oldGrade) ? oldGrade : null,
-            newValue: hasGrade(newGrade) ? newGrade : null,
-            userId:   (typeof Auth !== "undefined" && Auth.getUser()) ? Auth.getUser().uid : "",
-            userName: currentUserName,
-            timestamp: now
-        }).catch(() => {});
-    }
-}
-
-// ── Firestore debounce helpers ────────────────────────────────────────────────
-
-// Internal: attempt a Firestore write, retrying on failure with exponential backoff.
-// Only retries if no newer write has been queued in the meantime.
-function _doFirestoreSave(snap, updatedAt, attempt) {
-    if (attempt === 0) {
-        if (typeof GansoLog !== "undefined") GansoLog.SAVE_STARTED({ subject: snap.subject, updatedAt });
-    } else {
-        if (typeof GansoLog !== "undefined") GansoLog.SAVE_RETRY({ subject: snap.subject, updatedAt, attempt });
-    }
-    DB.saveSubjectData(institutionId, snap.subject, snap, updatedAt)
-        .then(() => {
-            _fsRetryTimer = null;
-            setSyncStatus("Guardado en la nube", "online");
-            if (typeof GansoLog !== "undefined") GansoLog.SAVE_SUCCESS({ subject: snap.subject, updatedAt, attempt });
-        })
-        .catch(err => {
-            const code = err?.code || err?.message || String(err);
-            if (typeof GansoLog !== "undefined") GansoLog.SAVE_FAILED({ subject: snap.subject, updatedAt, attempt, code });
-            console.warn("[Ganso] SAVE_FAILED attempt=" + (attempt + 1) + "/" + (FS_MAX_RETRIES + 1), code);
-            // A newer snapshot was already queued — its write will supersede this one.
-            if (_fsPendingSnap !== null) {
-                if (typeof GansoLog !== "undefined") GansoLog.SAVE_ABORTED_STALE({ reason: "newer_snap_queued" });
-                return;
-            }
-            if (attempt < FS_MAX_RETRIES) {
-                const delay = Math.pow(2, attempt) * 1000; // 1 s, 2 s, 4 s
-                setSyncStatus("Reintentando guardado...", "pending");
-                _fsRetryTimer = setTimeout(() => {
-                    _fsRetryTimer = null;
-                    // Abort if a fresh write cycle has started while we were waiting.
-                    if (_fsPendingSnap !== null || _fsWriteTimer !== null) {
-                        if (typeof GansoLog !== "undefined") GansoLog.SAVE_ABORTED_STALE({ reason: "new_cycle_started" });
-                        return;
-                    }
-                    _doFirestoreSave(snap, updatedAt, attempt + 1);
-                }, delay);
-            } else {
-                setSyncStatus("Guardado local (sin nube)", "pending");
-            }
-        });
-}
-
-function scheduleFirestoreSave(snapshot) {
-    if (!firebaseMode || !institutionId || !snapshot.subject || typeof DB === "undefined") return;
-    // Cancel any in-progress retry — the new snapshot supersedes it.
-    clearTimeout(_fsRetryTimer);
-    _fsRetryTimer  = null;
-    _fsPendingSnap = snapshot;
-    clearTimeout(_fsWriteTimer);
-    if (typeof GansoLog !== "undefined") GansoLog.SAVE_QUEUED({ subject: snapshot.subject });
-    _fsWriteTimer = setTimeout(() => {
-        const snap = _fsPendingSnap;
-        _fsPendingSnap = null;
-        _fsWriteTimer  = null;
-        if (!snap || !snap.subject) return;
-        const updatedAt = new Date().toISOString();
-        _lastOwnUpdatedAt = updatedAt;
-        _doFirestoreSave(snap, updatedAt, 0);
-    }, FS_DEBOUNCE_MS);
-    setSyncStatus("Sincronizando...", "pending");
-}
-
-function flushFirestoreSave() {
-    if (_fsWriteTimer === null && _fsPendingSnap === null) return;
-    clearTimeout(_fsWriteTimer);
-    _fsWriteTimer = null;
-    const snap = _fsPendingSnap;
-    _fsPendingSnap = null;
-    if (!snap || !snap.subject || !institutionId || typeof DB === "undefined") return;
-    const updatedAt = new Date().toISOString();
-    _lastOwnUpdatedAt = updatedAt;
-    if (typeof GansoLog !== "undefined") GansoLog.FLUSH_START({ subject: snap.subject, updatedAt });
-    // Fire-and-forget on unload/logout — no retry since the page is closing.
-    DB.saveSubjectData(institutionId, snap.subject, snap, updatedAt)
-        .then(() => {
-            setSyncStatus("Guardado en la nube", "online");
-            if (typeof GansoLog !== "undefined") GansoLog.FLUSH_COMPLETE({ subject: snap.subject });
-        })
-        .catch(err => {
-            setSyncStatus("Guardado local (sin nube)", "pending");
-            if (typeof GansoLog !== "undefined") GansoLog.FLUSH_FAILED({ subject: snap.subject, code: err?.code });
-        });
-}
-
-function cancelFirestoreSave() {
-    const hadPending = _fsWriteTimer !== null || _fsPendingSnap !== null || _fsRetryTimer !== null;
-    clearTimeout(_fsWriteTimer);
-    clearTimeout(_fsRetryTimer);
-    _fsWriteTimer  = null;
-    _fsPendingSnap = null;
-    _fsRetryTimer  = null;
-    if (hadPending && typeof GansoLog !== "undefined") {
-        GansoLog.SAVE_CANCELLED({ subject: appState?.subject || null });
-    }
-}
-
-// ── Listener en tiempo real ───────────────────────────────────────────────────
-function attachSubjectListener(subject) {
-    detachSubjectListener();
-    if (!firebaseMode || !institutionId || !subject || typeof DB === "undefined") return;
-    _listenerFirst = true;
-    _fsListener = DB.subscribeToSubject(institutionId, subject, (docSnap) => {
-        if (_listenerFirst) { _listenerFirst = false; return; }
-        if (docSnap.metadata.hasPendingWrites) return;
-        if (docSnap.metadata.fromCache) return;
-        const norm = s => String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-        if (norm(subject) !== norm(appState.subject)) return;
-        if (!docSnap.exists) return;
-        const remoteData = { id: docSnap.id, ...docSnap.data() };
-        if (typeof GansoLog !== "undefined") GansoLog.SNAPSHOT_RECEIVED({ subject: remoteData.subject, remoteUpdatedAt: remoteData.updatedAt });
-        if (!remoteData.courses || !remoteData.courses.length) {
-            if (typeof GansoLog !== "undefined") GansoLog.SNAPSHOT_IGNORED({ reason: "empty_courses" });
-            return;
-        }
-        // Skip our own confirmed write echo by matching the exact updatedAt we sent
-        if (_lastOwnUpdatedAt && remoteData.updatedAt === _lastOwnUpdatedAt) {
-            if (typeof GansoLog !== "undefined") GansoLog.REMOTE_SKIPPED_ECHO({ updatedAt: remoteData.updatedAt });
-            return;
-        }
-        // Only act if remote data is genuinely newer than what we have locally
-        const localTs  = savedSnapshot ? parseDateTime(savedSnapshot.lastSavedAt) : 0;
-        const remoteTs = remoteData.updatedAt
-            ? new Date(remoteData.updatedAt).getTime()
-            : parseDateTime(remoteData.lastSavedAt);
-        if (remoteTs <= localTs) {
-            if (typeof GansoLog !== "undefined") GansoLog.REMOTE_SKIPPED_STALE({ remoteTs, localTs });
-            return;
-        }
-        // If the user is not actively editing, auto-apply remote changes silently.
-        // _fsRetryTimer is included: a retry in flight means we have unsaved data pending.
-        const hasFocusedInput = document.activeElement?.classList.contains("grade-cell-input");
-        const isEditing = _fsWriteTimer !== null || _fsPendingSnap !== null || _fsRetryTimer !== null || hasFocusedInput;
-        if (!isEditing) {
-            if (typeof GansoLog !== "undefined") GansoLog.REMOTE_APPLIED({ subject: remoteData.subject, remoteTs, localTs });
-            const prevCourse = selectedCourse;
-            loadStateFromSnapshot(remoteData);
-            if (appState.courses.includes(prevCourse)) selectedCourse = prevCourse;
-            hydrateControls(); renderAll(); renderSavedSession(); renderFlow(); updateDisabledState();
-            // Save to localStorage only — no Firestore re-upload of data we just received
-            try {
-                const snap = createSnapshot();
-                localStorage.setItem(storageKey(appState.subject), JSON.stringify(snap));
-                if (appState.subject) localStorage.setItem(lastSubjectKey(), appState.subject);
-                savedSnapshot = snap;
-                setSyncStatus("Sincronizado", "online");
-            } catch(_) {}
-            if (elements.dbDataBox) elements.dbDataBox.classList.add("hidden");
-            showToast("Notas actualizadas desde otro dispositivo.");
-            return;
-        }
-        // User is actively editing — offer to load without interrupting
-        if (typeof GansoLog !== "undefined") GansoLog.REMOTE_CONFLICT({ subject: remoteData.subject, remoteTs, localTs, reason: "user_editing" });
-        const boxAlreadyVisible = elements.dbDataBox && !elements.dbDataBox.classList.contains("hidden");
-        showDbDataBox(remoteData);
-        if (!boxAlreadyVisible) showToast("Otro dispositivo guardó cambios. Ir al Paso 2 para cargar.");
-    });
-}
-
-function detachSubjectListener() {
-    if (_fsListener) { _fsListener(); _fsListener = null; }
-    _listenerFirst = true;
 }
 
 // ── Guardar estado ────────────────────────────────────────────────────────────
@@ -1798,7 +1324,7 @@ function saveLocalState(updateTimestamp = true) {
     // Guardar en Firestore con debounce — se intenta incluso si localStorage falló,
     // para evitar pérdida total de datos cuando el almacenamiento local está lleno.
     if (firebaseMode && institutionId && appState.subject && hasData()) {
-        scheduleFirestoreSave(snapshot);
+        SyncModule.schedule(snapshot);
     }
 
     if (localStorageFailed) {
@@ -2110,7 +1636,7 @@ function addCourse(event) {
     const count = parseInt(elements.newCourseStudentsCount?.value || "30", 10);
     if (!name) { showToast("Escribí el nombre del curso."); return; }
     if (!isValidSheetName(name))   { showToast("El nombre del curso no puede usar / \\ ? * [ ] : ni superar 31 caracteres."); return; }
-    if (isReservedSheetName(name)) { showToast("Ese nombre está reservado para el Excel."); return; }
+    if (ExcelModule.isReservedSheetName(name)) { showToast("Ese nombre está reservado para el Excel."); return; }
     if (findCourseByName(name))    { showToast("Ese curso ya existe."); return; }
 
     const students = generateRandomStudents(count);
@@ -2161,7 +1687,7 @@ function addStudents(event) {
     // Registrar en historial: conteo incremental por alumno (antes = conteo antes de ese alumno específico)
     const countBase = existing.length - newStudents.length;
     newStudents.forEach((student, idx) => {
-        logHistoryEntry("Alumno insertado", course, student, "Matrícula", countBase + idx, countBase + idx + 1);
+        HistoryModule.log("Alumno insertado", course, student, "Matrícula", countBase + idx, countBase + idx + 1);
     });
 
     selectedCourse = course;
@@ -2202,7 +1728,7 @@ async function removeStudent(event) {
     });
     const countAfterRemove = appState.students[course].length;
     // Registrar con detalle: acción explícita + conteo antes/después via logHistoryEntry (cubre Firebase también)
-    logHistoryEntry("Alumno eliminado", course, student, "Matrícula", countBeforeRemove, countAfterRemove);
+    HistoryModule.log("Alumno eliminado", course, student, "Matrícula", countBeforeRemove, countAfterRemove);
 
     // Registrar en overrides para que la eliminación persista al importar Excel o datos de Firebase
     if (!appState.studentOverrides) appState.studentOverrides = { additions: {}, removals: {} };
@@ -2341,93 +1867,6 @@ function closeAllModals() {
     closeHeaderTools();
 }
 
-// ── Historial visible en pantalla ─────────────────────────────────────────────
-function openHistoryModal() {
-    const modal = document.getElementById("historyModal");
-    if (!modal) return;
-    const hasLocal  = appState.historyRows.length > 0;
-    const canFetch  = firebaseMode && !!institutionId && !!appState.subject && typeof DB !== "undefined";
-    if (!hasLocal && !canFetch) { showToast("Aún no hay historial para mostrar."); return; }
-    _historyDisplayRows = null;
-    _historyModalOpen   = true;
-    modal.classList.remove("hidden");
-    if (elements.historySearch) elements.historySearch.value = "";
-    if (!canFetch) { renderHistoryModal(""); return; }
-    if (hasLocal) renderHistoryModal("");
-    else if (elements.historyModalBody) {
-        elements.historyModalBody.innerHTML =
-            `<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:20px;">Cargando historial...</td></tr>`;
-    }
-    DB.getHistory(institutionId, appState.subject).then(docs => {
-        if (!_historyModalOpen) return; // modal cerrado mientras el fetch estaba en vuelo
-        const fsRows = docs.map(doc => [
-            doc.timestamp || "",
-            doc.action    || "",
-            doc.course    || "",
-            doc.student   || "",
-            doc.column    || "",
-            doc.oldValue != null ? String(doc.oldValue) : "",
-            doc.newValue != null ? String(doc.newValue) : "",
-        ]);
-        // Add local pending rows not yet visible in Firestore (network lag)
-        const fsKeys = new Set(fsRows.map(r => r.map(v => String(v ?? "")).join("||")));
-        const localOnly = [...appState.historyRows].reverse().filter(r =>
-            !fsKeys.has((r || []).map(v => String(v ?? "")).join("||"))
-        );
-        _historyDisplayRows = [...localOnly, ...fsRows]; // newest first
-        renderHistoryModal(elements.historySearch?.value || "");
-    }).catch(() => { if (_historyModalOpen) renderHistoryModal(elements.historySearch?.value || ""); });
-}
-
-function closeHistoryModal() {
-    const modal = document.getElementById("historyModal");
-    if (modal) modal.classList.add("hidden");
-    _historyDisplayRows = null;
-    _historyModalOpen   = false;
-}
-
-function filterHistoryModal() {
-    renderHistoryModal(elements.historySearch?.value || "");
-}
-
-function renderHistoryModal(filter) {
-    if (!elements.historyModalBody) return;
-    const q    = filter.toLowerCase().trim();
-    const rows = _historyDisplayRows ?? [...appState.historyRows].reverse(); // newest first
-    const filtered = q
-        ? rows.filter(r => (r || []).some(v => String(v ?? "").toLowerCase().includes(q)))
-        : rows;
-
-    if (!filtered.length) {
-        elements.historyModalBody.innerHTML =
-            `<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:20px;">Sin resultados para esa búsqueda.</td></tr>`;
-        return;
-    }
-
-    const LIMIT = 300;
-    const shown = filtered.slice(0, LIMIT);
-    const extra = filtered.length > LIMIT
-        ? `<tr><td colspan="7" style="text-align:center;color:var(--muted);font-size:12px;padding:10px;">Mostrando ${LIMIT} de ${filtered.length} registros. Usá el buscador para filtrar.</td></tr>`
-        : "";
-
-    elements.historyModalBody.innerHTML = shown.map(row => {
-        const [fecha, accion, curso, alumno, columna, ant, nuevo] = (row || []).map(v => String(v ?? ""));
-        const isStudentOp = accion.includes("Alumno");
-        const badgeClass  = isStudentOp ? "action-student" : "action-grade";
-        const antDisplay  = ant.trim()   !== "" ? escapeHtml(isStudentOp ? `${ant} alumnos` : ant)   : `<span style="color:var(--muted)">—</span>`;
-        const newDisplay  = nuevo.trim() !== "" ? escapeHtml(isStudentOp ? `${nuevo} alumnos` : nuevo) : `<span style="color:var(--muted)">—</span>`;
-        return `<tr>
-            <td style="white-space:nowrap;color:var(--muted);font-size:12px">${escapeHtml(fecha)}</td>
-            <td><span class="history-action-badge ${badgeClass}">${escapeHtml(accion)}</span></td>
-            <td>${escapeHtml(curso)}</td>
-            <td>${escapeHtml(alumno)}</td>
-            <td style="color:var(--muted)">${escapeHtml(columna)}</td>
-            <td style="color:var(--muted)">${antDisplay}</td>
-            <td>${newDisplay}</td>
-        </tr>`;
-    }).join("") + extra;
-}
-
 // ── Estado y observaciones del alumno ────────────────────────────────────────
 function saveStudentExtras() {
     const course  = elements.courseSelect?.value || selectedCourse;
@@ -2479,7 +1918,7 @@ async function restoreAutoBackup() {
         if (!snap || !Array.isArray(snap.courses)) { showToast("El auto-backup no es válido."); return; }
         const ts = snap.lastSavedAt || "(fecha desconocida)";
         if (!await confirmDialog(`¿Restaurar el auto-backup guardado el ${ts}?\nSe reemplazarán los datos actuales.`, { confirmText: "Sí, restaurar", cancelText: "Cancelar" })) return;
-        cancelFirestoreSave();
+        SyncModule.cancel();
         loadStateFromSnapshot(snap);
         selectedCourse = appState.courses[0] || "";
         activeStep     = 3;
@@ -2585,7 +2024,7 @@ async function generateSampleData() {
         !await confirmDialog("Generar datos de muestra reemplaza los datos actuales.", { confirmText: "Sí, generar", cancelText: "Cancelar" })) return;
 
     const subject = appState.subject || elements.subjectInput?.value.trim() || "Sin materia";
-    cancelFirestoreSave();
+    SyncModule.cancel();
     appState = createInitialState(subject);
     const now = formatDateTime(new Date());
     const perCourse = 20;
@@ -2706,12 +2145,12 @@ async function exportFinalExcel() {
 
     try {
         saveLocalState(true);
-        const workbook = buildWorkbookFromState();
+        const workbook = ExcelModule.buildWorkbook();
         const data = XLSX.write(workbook, { bookType: "xlsx", type: "array", compression: true });
         const blob = new Blob([data], { type: EXCEL_MIME });
-        const fileName = buildExportFileName("xlsx");
+        const fileName = ExcelModule.buildExportFileName("xlsx");
         _lastExportData = { data, fileName };
-        downloadBlob(blob, fileName);
+        ExcelModule.downloadBlob(blob, fileName);
         setSyncStatus("Excel generado correctamente", "online");
         showToast("Excel generado correctamente.");
         showExportSuccess(fileName);
@@ -2727,10 +2166,10 @@ async function exportFinalExcel() {
 function autoExportExcel() {
     if (!window.XLSX) return;
     try {
-        const workbook = buildWorkbookFromState();
+        const workbook = ExcelModule.buildWorkbook();
         const data     = XLSX.write(workbook, { bookType: "xlsx", type: "array", compression: true });
         const blob     = new Blob([data], { type: EXCEL_MIME });
-        downloadBlob(blob, buildExportFileName("xlsx"));
+        ExcelModule.downloadBlob(blob, ExcelModule.buildExportFileName("xlsx"));
         showToast("Excel actualizado y descargado.");
     } catch (err) {
         console.error(err);
@@ -2739,7 +2178,7 @@ function autoExportExcel() {
 }
 
 function resetAfterExport() {
-    detachSubjectListener();
+    SyncModule.detach();
     if (elements.exportSuccessOverlay) elements.exportSuccessOverlay.classList.add("hidden");
     _lastExportData = null;
     savedSnapshot  = null;
@@ -2765,7 +2204,7 @@ async function flushAndResetAfterExport() {
     const instId = institutionId;   // no se borra en reset, pero lo capturamos igual
 
     // Cancelar el debounce pendiente: vamos a escribir de forma directa y garantizada.
-    cancelFirestoreSave();
+    SyncModule.cancel();
 
     if (snap && snap.subject && firebaseMode && instId && typeof DB !== "undefined") {
         try { await DB.saveSubjectData(instId, snap.subject, snap); } catch (_) {}
@@ -2786,7 +2225,7 @@ function showExportSuccess(fileName) {
                          Boolean(typeof Auth !== "undefined" && Auth.getUser && Auth.getUser()?.email);
         shareBtn.style.display = canShare ? "" : "none";
         shareBtn.addEventListener("click", async () => {
-            await shareExcelByEmail();
+            await EmailModule.share(_lastExportData);
             if (elements.exportSuccessOverlay) elements.exportSuccessOverlay.classList.add("hidden");
         }, { once: true });
     }
@@ -2799,181 +2238,10 @@ function showExportSuccess(fileName) {
     }, { once: true });
 }
 
-// Carga la config pública del servidor de correo (solo .exe).
-// Solo cachea cuando está configurada; si no, deja null para reintentar en el próximo intento.
-async function fetchElectronMailCfg() {
-    if (_electronMailCfg !== null) return _electronMailCfg;
-    try {
-        const res = await fetch("/mail-config");
-        const cfg = await res.json();
-        if (cfg.available) _electronMailCfg = cfg;  // solo cachea si está configurado
-        return cfg;
-    } catch (_) {
-        return { available: false, defaultRecipients: [], messageTemplate: null };
-    }
-}
-
-// Convierte un array/Uint8Array a base64 de forma segura (chunk de 8 KB)
-function arrayToBase64(arr) {
-    const bytes = arr instanceof Uint8Array ? arr : new Uint8Array(arr);
-    let b64 = "";
-    const CHUNK = 8192;
-    for (let i = 0; i < bytes.length; i += CHUNK) {
-        b64 += String.fromCharCode(...bytes.subarray(i, Math.min(i + CHUNK, bytes.length)));
-    }
-    return btoa(b64);
-}
-
-// Interpola el template del mensaje con los datos actuales
-function buildEmailBody(template) {
-    const tpl = template ||
-        "Estimado/a,\n\nAdjunto encontrará el archivo Excel con las notas de {materia}, año {anio}.\n\nEl documento contiene el registro completo de calificaciones de todos los cursos, actualizado a la fecha de envío.\n\nEste mensaje fue generado automáticamente por el sistema Ganso-Paralelo.\n\nSaludos cordiales,\n{remitente}";
-    const remitente = (typeof Auth !== "undefined" && Auth.getUser)
-        ? (Auth.getUser()?.displayName || Auth.getUser()?.email || "el/la docente")
-        : "el/la docente";
-    return tpl
-        .replace(/{materia}/g, appState.subject || "la materia")
-        .replace(/{anio}/g,    String(new Date().getFullYear()))
-        .replace(/{remitente}/g, remitente);
-}
-
-async function shareExcelByEmail() {
-    if (!_lastExportData) { showToast("Primero generá el archivo."); return; }
-    const { data, fileName } = _lastExportData;
-    const isElectron = navigator.userAgent.includes("Electron");
-
-    // ── .exe: envío directo con Nodemailer ──────────────────────────────────────
-    if (isElectron) {
-        // Obtener config antes de mostrar el modal (ya está cacheada por el pre-fetch al inicio)
-        const cfg       = await fetchElectronMailCfg();
-        const userEmail = (typeof Auth !== "undefined" && Auth.getUser) ? (Auth.getUser()?.email || "") : "";
-
-        return new Promise(resolve => {
-            const modal   = elements.shareEmailModal;
-            const form    = elements.shareEmailForm;
-            const input   = elements.shareEmailInput;
-            const sendBtn = elements.shareEmailSendBtn;
-            const cancel  = elements.cancelShareEmailBtn;
-            if (!modal || !form || !input) { resolve(); return; }
-
-            // Preseleccionar el primer destinatario configurado; el email del docente como fallback
-            input.value = (cfg.defaultRecipients || [])[0] || userEmail;
-            modal.classList.remove("hidden");
-            input.focus();
-
-            // Poblar datalist de forma síncrona (config ya disponible)
-            const datalist = document.getElementById("shareEmailList");
-            if (datalist) {
-                const existing = new Set([...datalist.options].map(o => o.value));
-                (cfg.defaultRecipients || []).forEach(email => {
-                    if (!existing.has(email)) {
-                        const opt = document.createElement("option");
-                        opt.value = email;
-                        datalist.appendChild(opt);
-                        existing.add(email);
-                    }
-                });
-                if (userEmail && !existing.has(userEmail)) {
-                    const opt = document.createElement("option");
-                    opt.value = userEmail;
-                    datalist.appendChild(opt);
-                }
-            }
-
-            function setSending(v) {
-                if (sendBtn) { sendBtn.disabled = v; sendBtn.textContent = v ? "Enviando…" : "Enviar"; }
-                if (cancel)  cancel.disabled = v;
-                if (input)   input.disabled  = v;
-            }
-
-            function closeModal() {
-                modal.classList.add("hidden");
-                setSending(false);
-                form.removeEventListener("submit", handleSubmit);
-                if (cancel) cancel.removeEventListener("click", handleCancel);
-            }
-
-            async function handleSubmit(e) {
-                e.preventDefault();
-                const toEmail = input.value.trim();
-                if (!toEmail) return;
-                setSending(true);
-                try {
-                    if (!cfg.available) {
-                        showToast("El envío automático no está configurado. Completá mail-config.json.");
-                        setSending(false);
-                        return;
-                    }
-                    const loggedUser = (typeof Auth !== "undefined" && Auth.getUser) ? Auth.getUser() : null;
-                    const senderFullName = (typeof Auth !== "undefined" && Auth.getName) ? Auth.getName() : null;
-                    const resp = await fetch("/send-email", {
-                        method:  "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            to:          toEmail,
-                            subject:     `Notas de ${appState.subject || "materia"} — ${new Date().getFullYear()}`,
-                            text:        buildEmailBody(cfg.messageTemplate),
-                            filename:    fileName,
-                            content:     arrayToBase64(data),
-                            senderName:  senderFullName || loggedUser?.email || null,
-                            replyTo:     loggedUser?.email || null,
-                        }),
-                    });
-                    const result = await resp.json();
-                    if (result.ok) {
-                        closeModal();
-                        showToast(`Correo enviado a ${toEmail}`);
-                        resolve(true);
-                    } else {
-                        showToast(result.message || "Error al enviar el correo. Intentá de nuevo.");
-                        setSending(false);
-                    }
-                } catch (_) {
-                    showToast("Error de conexión con el servidor de correo.");
-                    setSending(false);
-                }
-            }
-
-            function handleCancel() { closeModal(); resolve(true); }
-
-            form.addEventListener("submit", handleSubmit);
-            if (cancel) cancel.addEventListener("click", handleCancel);
-        });
-    }
-
-    // ── APK/Web: Web Share API con archivo adjunto ──────────────────────────────
-    if (typeof navigator.share === "function") {
-        try {
-            const file = new File([data], fileName, { type: EXCEL_MIME });
-            await navigator.share({
-                files: [file],
-                title: fileName,
-                text:  `Notas de ${appState.subject || "materia"} — ${new Date().getFullYear()}`,
-            });
-            return false;
-        } catch (err) {
-            if (err.name === "AbortError") return false;
-            // Compartir con archivo no soportado por el dispositivo — se usa el fallback
-        }
-    }
-
-    // ── Fallback: abrir cliente de correo del sistema ───────────────────────────
-    const userEmail = (typeof Auth !== "undefined" && Auth.getUser) ? (Auth.getUser()?.email || "") : "";
-    const subject   = encodeURIComponent(`Notas — ${appState.subject || "materia"} ${new Date().getFullYear()}`);
-    const body      = encodeURIComponent(`Hola,\n\nAdjuntá el archivo de notas: ${fileName}\n\n— Ganso-Paralelo`);
-    const a = document.createElement("a");
-    a.href = `mailto:${userEmail}?subject=${subject}&body=${body}`;
-    a.target = "_blank";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    showToast("Se abrió tu correo. Adjuntá el archivo descargado.");
-    return false;
-}
 
 function resetToStep1() {
-    detachSubjectListener();
-    cancelFirestoreSave();
+    SyncModule.detach();
+    SyncModule.cancel();
     if (elements.exportSuccessOverlay) elements.exportSuccessOverlay.classList.add("hidden");
     _lastExportData = null;
     appState      = createInitialState();
@@ -2992,155 +2260,6 @@ function resetToStep1() {
     updateLockUI();
     setSyncStatus("Conectado", "online");
     updateNotice("warning", "Para comenzar, seleccioná la materia.", "El sistema te guiará paso a paso hasta generar el archivo final.");
-}
-
-function buildWorkbookFromState() {
-    normalizeState(appState);
-    const workbook = XLSX.utils.book_new();
-    workbook.Props = {
-        Title: `Notas — ${appState.subject || "Materia"}`,
-        Subject: appState.subject || "",
-        Author: institutionName || "Ganso-Paralelo",
-        CreatedDate: new Date()
-    };
-    const usedSheetNames = new Set([
-        SUMMARY_SHEET, HISTORY_SHEET,
-        SUMMARY_SHEET.toLocaleLowerCase(), HISTORY_SHEET.toLocaleLowerCase()
-    ]);
-    const sheetNameByCourse = {};
-    appState.courses.forEach(course => {
-        sheetNameByCourse[course] = uniqueSheetName(course, usedSheetNames);
-    });
-    XLSX.utils.book_append_sheet(workbook, buildSummaryWorksheet(sheetNameByCourse), SUMMARY_SHEET);
-    appState.courses.forEach(course => {
-        XLSX.utils.book_append_sheet(workbook, buildCourseWorksheet(course), sheetNameByCourse[course]);
-    });
-    XLSX.utils.book_append_sheet(workbook, buildHistoryWorksheet(), HISTORY_SHEET);
-    workbook.Workbook       = workbook.Workbook || {};
-    workbook.Workbook.CalcPr = { fullCalcOnLoad: true };
-    return workbook;
-}
-
-function buildCourseWorksheet(course) {
-    const cols     = getCourseColumns(course);
-    const headers  = ["N", "Alumno", ...cols.map(col => getColLabel(col, course)), "Promedio", "Ultima actualizacion"];
-    const rows     = [headers];
-    const students = appState.students[course] || [];
-
-    students.forEach((student, index) => {
-        const record = getRecord(course, student);
-        const grades = cols.map(col => record.grades[col] === "" ? "" : record.grades[col]);
-        rows.push([index + 1, student, ...grades, "", record.updatedAt || ""]);
-    });
-
-    const worksheet   = XLSX.utils.aoa_to_sheet(rows);
-    const promColIdx  = 2 + cols.length;
-    const firstGrCol  = XLSX.utils.encode_col(2);
-    const lastGrCol   = XLSX.utils.encode_col(1 + cols.length);
-    const lastAllCol  = XLSX.utils.encode_col(2 + cols.length + 1);
-
-    students.forEach((student, index) => {
-        const excelRow = index + 2;
-        const record   = getRecord(course, student);
-        const average  = calculateAverage(cols.map(col => record.grades[col]));
-        const address  = XLSX.utils.encode_cell({ r: excelRow - 1, c: promColIdx });
-        worksheet[address] = {
-            t: average === null ? "s" : "n",
-            f: `IFERROR(AVERAGE(${firstGrCol}${excelRow}:${lastGrCol}${excelRow}),"")`,
-            v: average === null ? "" : average,
-            z: "0.0"
-        };
-    });
-
-    worksheet["!cols"]       = [{ wch: 6 }, { wch: 32 }, ...cols.map(() => ({ wch: 10 })), { wch: 12 }, { wch: 22 }];
-    worksheet["!freeze"]     = { xSplit: 2, ySplit: 1, topLeftCell: "C2", activePane: "bottomRight", state: "frozen" };
-    worksheet["!autofilter"] = { ref: `A1:${lastAllCol}${Math.max(rows.length, 1)}` };
-    worksheet["!margins"]    = { left: 0.3, right: 0.3, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 };
-    return worksheet;
-}
-
-function buildSummaryWorksheet(sheetNameByCourse) {
-    const inst = institutionName || institutionId || "";
-    const rows = [
-        ["Institución", inst || "—"],
-        ["Materia",     appState.subject || ""],
-        ["Generado",    formatDateTime(new Date())],
-        [],
-        ["Curso", "Alumnos", "Aprobados", "Desaprobados", "Notas cargadas", "Promedio", "Última actualización"]
-    ];
-
-    appState.courses.forEach(course => {
-        const cs = getCourseStats(course);
-        rows.push([course, cs.students, cs.passed, cs.failed, "", "", cs.lastUpdated || ""]);
-    });
-
-    const worksheet = XLSX.utils.aoa_to_sheet(rows);
-    worksheet["!cols"] = [{ wch: 18 }, { wch: 12 }, { wch: 14 }, { wch: 16 }, { wch: 18 }, { wch: 14 }, { wch: 22 }];
-    appState.courses.forEach((course, index) => {
-        const cc          = getCourseColumns(course);
-        const fGrCol      = XLSX.utils.encode_col(2);
-        const lGrCol      = XLSX.utils.encode_col(1 + cc.length);
-        const excelRow    = index + 6;
-        const lastStuRow  = (appState.students[course] || []).length + 1;
-        const sheetRef    = quoteSheetName(sheetNameByCourse[course]);
-        const allGrades   = Object.values(appState.records[course] || {}).flatMap(r => cc.map(c => r.grades[c]));
-        const loaded      = allGrades.filter(hasGrade).length;
-        const average     = calculateAverage(allGrades);
-        const stuCount = (appState.students[course] || []).length;
-        if (stuCount > 0) {
-            worksheet[XLSX.utils.encode_cell({ r: excelRow - 1, c: 4 })] = {
-                t: "n", f: `COUNT(${sheetRef}!${fGrCol}2:${lGrCol}${lastStuRow})`, v: loaded
-            };
-            worksheet[XLSX.utils.encode_cell({ r: excelRow - 1, c: 5 })] = {
-                t: average === null ? "s" : "n",
-                f: `IFERROR(AVERAGE(${sheetRef}!${fGrCol}2:${lGrCol}${lastStuRow}),"")`,
-                v: average === null ? "" : average, z: "0.0"
-            };
-        } else {
-            worksheet[XLSX.utils.encode_cell({ r: excelRow - 1, c: 4 })] = { t: "n", v: 0 };
-            worksheet[XLSX.utils.encode_cell({ r: excelRow - 1, c: 5 })] = { t: "s", v: "" };
-        }
-    });
-    return worksheet;
-}
-
-function buildHistoryWorksheet() {
-    const worksheet = XLSX.utils.aoa_to_sheet([HISTORY_HEADERS, ...appState.historyRows]);
-    worksheet["!cols"] = [{ wch: 18 }, { wch: 16 }, { wch: 16 }, { wch: 32 }, { wch: 12 }, { wch: 16 }, { wch: 14 }];
-    worksheet["!autofilter"] = { ref: `A1:G${Math.max(appState.historyRows.length + 1, 1)}` };
-    return worksheet;
-}
-
-// ── Backup ────────────────────────────────────────────────────────────────────
-function downloadBackup() {
-    if (!hasData() && !snapshotHasData(savedSnapshot)) { showToast("No hay datos para respaldar."); return; }
-    const snapshot = hasData() ? createSnapshot() : savedSnapshot;
-    const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: "application/json" });
-    downloadBlob(blob, buildExportFileName("json", "backup"));
-    showToast("Backup descargado.");
-}
-
-async function clearAllData() {
-    if (!hasData() && !snapshotHasData(savedSnapshot)) { showToast("No hay datos guardados para borrar."); return; }
-    if (!await confirmDialog("¿Borrar todos los datos guardados en este navegador? El archivo original no se modifica.", { confirmText: "Sí, borrar", cancelText: "Cancelar" })) return;
-    detachSubjectListener();
-    cancelFirestoreSave();
-    createPreOpBackup('clear_all');
-    clearAllLocalSnapshots();
-    savedSnapshot  = null;
-    dbPendingData  = null;
-    appState       = createInitialState();
-    selectedCourse = "";
-    activeStep     = 1;
-    hasReviewed    = false;
-    lockState      = { locked: false, lockedBy: null, lockedByName: null };
-    if (elements.subjectInput) elements.subjectInput.value = "";
-    if (elements.dbDataBox) elements.dbDataBox.classList.add("hidden");
-    hydrateControls(); renderAll(); renderSavedSession(); renderFlow(); updateDisabledState();
-    updateLockUI();
-    setSyncStatus("Sin datos cargados", "pending");
-    updateNotice("warning", "Para comenzar, seleccioná la materia.", "El sistema te guiará paso a paso.");
-    showToast("Datos locales borrados.");
 }
 
 // ── Estado de controles ───────────────────────────────────────────────────────
@@ -3395,37 +2514,6 @@ function uniqueStrings(values) {
 
 function isValidSheetName(name)   { return name.length > 0 && name.length <= 31 && !/[:\\/?*[\]]/.test(name); }
 function findCourseByName(name)   { const k = name.toLocaleLowerCase(); return appState.courses.find(c => c.toLocaleLowerCase() === k); }
-function isSystemSheet(name)      { return [SUMMARY_SHEET, HISTORY_SHEET].some(n => n.toLocaleLowerCase() === String(name).toLocaleLowerCase()); }
-function isReservedSheetName(name){ return isSystemSheet(name); }
-
-function getCellValue(ws, row, col) {
-    if (col === undefined || col === null) return "";
-    const cell = ws[XLSX.utils.encode_cell({ r: row, c: col })];
-    return cell ? cell.v : "";
-}
-
-function getCellText(ws, row, col) {
-    if (col === undefined || col === null) return "";
-    const cell = ws[XLSX.utils.encode_cell({ r: row, c: col })];
-    if (!cell) return "";
-    return String(cell.w ?? cell.v ?? "");
-}
-
-function quoteSheetName(name)  { return `'${String(name).replace(/'/g, "''")}'`; }
-
-function uniqueSheetName(rawName, usedNames) {
-    const base = String(rawName || "Curso").replace(/[:\\/?*[\]]/g, "-").trim().slice(0, 31) || "Curso";
-    let name   = base;
-    let idx    = 2;
-    while (usedNames.has(name.toLocaleLowerCase()) || usedNames.has(name)) {
-        const suffix = ` ${idx}`;
-        name = `${base.slice(0, 31 - suffix.length)}${suffix}`;
-        idx++;
-    }
-    usedNames.add(name);
-    usedNames.add(name.toLocaleLowerCase());
-    return name;
-}
 
 function formatNumber(value) {
     if (value === null || value === undefined || value === "") return "";
@@ -3459,33 +2547,6 @@ function parseDateTime(value) {
     return new Date(Number(yyyy), Number(mm) - 1, Number(dd), Number(HH), Number(MM)).getTime();
 }
 
-function normalizeHeader(value) {
-    return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-        .trim().toLocaleLowerCase().replace(/\s+/g, " ");
-}
-
-function buildExportFileName(extension, prefix = "") {
-    const inst    = sanitizeFilePart(institutionName || institutionId || "");
-    const subject = sanitizeFilePart(appState.subject || "materia");
-    const year    = String(new Date().getFullYear());
-    const parts   = [inst, subject, year].filter(Boolean);
-    const name    = parts.join("_");
-    return prefix ? `${prefix}_${name}.${extension}` : `${name}.${extension}`;
-}
-
-function sanitizeFilePart(value) {
-    return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-        .replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 42) || "";
-}
-
-function downloadBlob(blob, fileName) {
-    const url  = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url; link.download = fileName;
-    document.body.appendChild(link);
-    link.click(); link.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
 
 // ── Selección de institución ──────────────────────────────────────────────────
 function getSessionInstitution() {

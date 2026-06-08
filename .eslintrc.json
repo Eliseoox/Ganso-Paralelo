@@ -15,6 +15,24 @@
         "GansoLog": "readonly",
         "FIREBASE_CONFIG": "readonly",
         "Chart": "readonly",
-        "Utils": "readonly"
-    }
+        "Utils": "readonly",
+        "ExcelModule": "readonly",
+        "SyncModule": "readonly",
+        "HistoryModule": "readonly",
+        "EmailModule": "readonly",
+        "BackupModule": "readonly"
+    },
+    "overrides": [
+        {
+            "files": ["web/modules/*.js"],
+            "rules": {
+                "no-undef": "off",
+                "no-empty": ["error", { "allowEmptyCatch": true }]
+            }
+        },
+        {
+            "files": ["web/utils.js"],
+            "globals": { "module": "writable" }
+        }
+    ]
 }

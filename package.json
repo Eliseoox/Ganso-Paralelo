@@ -4,8 +4,8 @@
     "description": "Sistema académico institucional multiplataforma para gestión de notas, boletines y sincronización escolar.",
     "private": true,
     "scripts": {
-        "lint": "eslint web/script.js web/auth.js web/db.js web/boletines.js web/estadisticas.js web/admin.js",
-        "lint:fix": "eslint --fix web/script.js web/auth.js web/db.js web/boletines.js web/estadisticas.js web/admin.js",
+        "lint": "eslint web/script.js web/utils.js web/auth.js web/db.js web/boletines.js web/estadisticas.js web/admin.js \"web/modules/*.js\"",
+        "lint:fix": "eslint --fix web/script.js web/utils.js web/auth.js web/db.js web/boletines.js web/estadisticas.js web/admin.js \"web/modules/*.js\"",
         "format": "prettier --write web/script.js web/auth.js web/db.js web/boletines.js web/estadisticas.js web/admin.js",
         "test": "vitest run"
     },
