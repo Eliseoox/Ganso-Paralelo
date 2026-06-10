@@ -558,6 +558,7 @@ async function confirmSubject(event) {
                     return;
                 }
                 loadStateFromSnapshot(dbData);
+                applyStudentOverrides(appState, appState.studentOverrides);
                 selectedCourse = appState.courses[0] || "";
                 activeStep     = 3;
                 hasReviewed    = false;
@@ -635,8 +636,9 @@ function loadFromDbButton_click() {
     const prevOverrides   = cloneData(appState.studentOverrides   || { additions: {}, removals: {} });
     const prevPendingHist = cloneData(appState.pendingHistoryRows || []);
     loadStateFromSnapshot(dbPendingData);
-    // Aplicar adiciones/eliminaciones manuales sobre los datos de Firebase
-    applyStudentOverrides(appState, prevOverrides);
+    // Fusionar overrides locales con los de Firestore; ninguno debe pisar al otro
+    const mergedOverrides = Utils.mergeOverrides(prevOverrides, appState.studentOverrides || { additions: {}, removals: {} });
+    applyStudentOverrides(appState, mergedOverrides);
     // Fusionar historial local con el de Firebase, sin duplicar filas
     appState.historyRows        = mergeHistoryRows(prevPendingHist, appState.historyRows);
     appState.pendingHistoryRows = cloneData(prevPendingHist);

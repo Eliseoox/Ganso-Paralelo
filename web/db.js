@@ -102,7 +102,9 @@
             // Excluir lock fields (se manejan por separado) y historyRows/pendingHistoryRows
             // (arrays de arrays — Firestore no los soporta; la historia vive en su propia colección).
             const { locked, lockedBy, lockedByName, lockedAt,
-                    historyRows, pendingHistoryRows, ...dataFields } = snapshot;
+                    historyRows, pendingHistoryRows,
+                    studentOverrides,
+                    ...dataFields } = snapshot;
             await ref.set({
                 ...dataFields,
                 institutionId,

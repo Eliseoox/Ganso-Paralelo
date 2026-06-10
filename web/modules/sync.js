@@ -105,7 +105,11 @@
         if (!firebaseMode || !institutionId || !subject || typeof DB === "undefined") return;
         _listenerFirst = true;
         _fsListener = DB.subscribeToSubject(institutionId, subject, (docSnap) => {
-            if (_listenerFirst) { _listenerFirst = false; return; }
+            if (_listenerFirst) {
+                _listenerFirst = false;
+                if (docSnap.metadata.fromCache) return; // descartar solo el estado offline inicial
+                // Si viene confirmado del servidor, procesarlo normalmente
+            }
             if (docSnap.metadata.hasPendingWrites) return;
             if (docSnap.metadata.fromCache) return;
             const norm = s => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
