@@ -99,7 +99,21 @@
         await Promise.all([loadData(), preloadLogo()]);
     });
 
-    $('logoutButton').addEventListener('click', () => { window._gansoLogout = true; Auth.signOut(); });
+    $('logoutButton').addEventListener('click', () => {
+        window._gansoLogout = true;
+        // Prevenir ghost state: limpiar datos locales de la sesión antes de cerrar.
+        // Necesario cuando el usuario trabajó en index.html y cerró sesión desde aquí.
+        try {
+            const inst = institutionId ? String(institutionId).replace(/[^a-zA-Z0-9]/g, '_') : 'local';
+            const prefix = `notas_docente_v2_${inst}_`;
+            const keys = [];
+            for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith(prefix)) keys.push(k); }
+            keys.forEach(k => localStorage.removeItem(k));
+            localStorage.removeItem(`ganso_last_subject_v2_${inst}`);
+            localStorage.removeItem('notas_docente_estado_v2');
+        } catch(_) {}
+        Auth.signOut();
+    });
 
     // ── Carga de datos ─────────────────────────────────────────────────────────
     async function loadData() {

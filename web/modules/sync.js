@@ -100,6 +100,30 @@
         }
     }
 
+    // Fusiona los registros de alumnos entre el estado local y el snapshot remoto,
+    // conservando el registro con updatedAt más reciente para cada alumno.
+    // Protege el caso donde dos dispositivos editan distintos alumnos simultáneamente:
+    // sin este merge, el "last write wins" a nivel documento borraría el trabajo del
+    // dispositivo que guardó primero.
+    function _mergeRecords(localState, remoteData) {
+        if (!localState.records || !remoteData.records) return remoteData;
+        const mergedRecords = {};
+        (remoteData.courses || []).forEach(course => {
+            mergedRecords[course] = { ...(remoteData.records[course] || {}) };
+            Object.keys(mergedRecords[course]).forEach(student => {
+                const localRec  = localState.records[course]?.[student];
+                if (!localRec) return; // alumno solo en remoto → conservar remoto
+                const localTs  = parseDateTime(localRec.updatedAt);
+                const remoteTs = parseDateTime(mergedRecords[course][student]?.updatedAt);
+                if (localTs > remoteTs) {
+                    // El registro local es más reciente: preservarlo en el merge
+                    mergedRecords[course][student] = localRec;
+                }
+            });
+        });
+        return { ...remoteData, records: mergedRecords };
+    }
+
     function attach(subject) {
         detach();
         if (!firebaseMode || !institutionId || !subject || typeof DB === "undefined") return;
@@ -137,15 +161,23 @@
             const isEditing = _fsWriteTimer !== null || _fsPendingSnap !== null || _fsRetryTimer !== null || hasFocusedInput;
             if (!isEditing) {
                 if (typeof GansoLog !== "undefined") GansoLog.REMOTE_APPLIED({ subject: remoteData.subject, remoteTs, localTs });
-                // Preservar overrides locales antes de reemplazar el estado con el remoto.
-                // Si no los fusionamos, un update de otra pestaña/dispositivo que no incluya
-                // studentOverrides borraría las bajas/altas manuales del usuario actual.
-                const prevOverrides = cloneData(appState.studentOverrides || { additions: {}, removals: {} });
+                // Preservar overrides, historial y curso activo antes de reemplazar el estado.
+                const prevOverrides   = cloneData(appState.studentOverrides   || { additions: {}, removals: {} });
+                const prevHistoryRows = cloneData(appState.historyRows        || []);
+                const prevPendingHist = cloneData(appState.pendingHistoryRows || []);
                 const prevCourse = selectedCourse;
-                loadStateFromSnapshot(remoteData);
+                // CRÍTICO 3: fusionar registros por updatedAt antes de aplicar el estado
+                // remoto, para conservar ediciones locales más recientes que el snapshot.
+                const mergedData = _mergeRecords(appState, remoteData);
+                loadStateFromSnapshot(mergedData);
                 // Fusionar overrides locales con los del doc remoto, luego re-aplicar
                 const mergedOverrides = Utils.mergeOverrides(prevOverrides, appState.studentOverrides || { additions: {}, removals: {} });
                 applyStudentOverrides(appState, mergedOverrides);
+                // ALTO 2: restaurar historial local. Los docs de Firestore nunca incluyen
+                // historyRows (excluidos en saveSubjectData), por lo que loadStateFromSnapshot
+                // los deja vacíos. Restaurarlos evita perder el historial de la sesión actual.
+                appState.historyRows        = prevHistoryRows;
+                appState.pendingHistoryRows = prevPendingHist;
                 if (appState.courses.includes(prevCourse)) selectedCourse = prevCourse;
                 hydrateControls(); renderAll(); renderSavedSession(); renderFlow(); updateDisabledState();
                 try {

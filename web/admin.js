@@ -69,7 +69,17 @@
         // else: picker screen stays visible (default)
     });
 
-    $('logoutButton').addEventListener('click', () => Auth.signOut());
+    $('logoutButton').addEventListener('click', () => {
+        try {
+            const keys = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const k = localStorage.key(i);
+                if (k && (k.startsWith('notas_docente_v2_') || k.startsWith('ganso_last_subject_v2_') || k === 'notas_docente_estado_v2')) keys.push(k);
+            }
+            keys.forEach(k => localStorage.removeItem(k));
+        } catch(_) {}
+        Auth.signOut();
+    });
 
     // ── Tabs ──────────────────────────────────────────────────────
     document.querySelectorAll('.tab-btn').forEach(btn => {

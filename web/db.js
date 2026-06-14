@@ -218,6 +218,62 @@
             return count;
         },
 
+        // Versión bulk de addStudentToAllSubjects: agrega varios alumnos en una sola
+        // query + batch para evitar race conditions cuando el usuario agrega 2+ alumnos
+        // simultáneamente (el patrón Promise.all anterior hacía N queries y N commits
+        // independientes sobre el mismo snapshot, y el último sobreescribía a los anteriores).
+        async addStudentsToAllSubjects(institutionId, course, studentNames) {
+            if (!studentNames || !studentNames.length) return 0;
+            const gradeColumns = ['Nota 1','Nota 2','Nota 3','Nota 4','Nota 5','Nota 6'];
+            const snap = await fs().collection('subjectData')
+                .where('institutionId', '==', institutionId).get();
+            if (snap.empty) return 0;
+            const batch = fs().batch();
+            let count = 0;
+            snap.docs.forEach(doc => {
+                const data = doc.data();
+                if (!(data.courses || []).includes(course)) return;
+                let currentStudents = [...(data.students?.[course] || [])];
+                const newCourseRecords = { ...(data.records?.[course] || {}) };
+                const curOverrides = data.studentOverrides || { additions: {}, removals: {} };
+                let curAdditions   = Array.isArray(curOverrides.additions?.[course]) ? [...curOverrides.additions[course]] : [];
+                let curRemovals    = Array.isArray(curOverrides.removals?.[course])  ? [...curOverrides.removals[course]]  : [];
+                let changed = false;
+                studentNames.forEach(studentName => {
+                    const nameLower = studentName.toLowerCase();
+                    if (currentStudents.some(s => s.toLowerCase() === nameLower)) return;
+                    currentStudents = [...currentStudents, studentName].sort();
+                    newCourseRecords[studentName] = {
+                        number: 0,
+                        grades: Object.fromEntries(gradeColumns.map(c => [c, ''])),
+                        average: '', updatedAt: '', notes: '', status: ''
+                    };
+                    if (!curAdditions.some(s => s.toLowerCase() === nameLower)) curAdditions.push(studentName);
+                    curRemovals = curRemovals.filter(s => s.toLowerCase() !== nameLower);
+                    changed = true;
+                });
+                if (!changed) return;
+                // Renumerar todos los registros una vez al final (más eficiente que por alumno)
+                currentStudents.forEach((s, i) => {
+                    if (newCourseRecords[s]) newCourseRecords[s].number = i + 1;
+                });
+                const newOverrides = {
+                    ...curOverrides,
+                    additions: { ...curOverrides.additions, [course]: curAdditions },
+                    removals:  { ...curOverrides.removals,  [course]: curRemovals  },
+                };
+                batch.update(doc.ref, {
+                    students:         { ...data.students, [course]: currentStudents },
+                    records:          { ...data.records,  [course]: newCourseRecords },
+                    studentOverrides: newOverrides,
+                    updatedAt:        new Date().toISOString()
+                });
+                count++;
+            });
+            await batch.commit();
+            return count;
+        },
+
         async removeStudentFromAllSubjects(institutionId, course, studentName) {
             const nameLower = studentName.toLowerCase();
             const snap = await fs().collection('subjectData')

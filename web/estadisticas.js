@@ -94,7 +94,19 @@
         await loadData();
     });
 
-    $('logoutButton').addEventListener('click', () => { window._gansoLogout = true; Auth.signOut(); });
+    $('logoutButton').addEventListener('click', () => {
+        window._gansoLogout = true;
+        try {
+            const inst = institutionId ? String(institutionId).replace(/[^a-zA-Z0-9]/g, '_') : 'local';
+            const prefix = `notas_docente_v2_${inst}_`;
+            const keys = [];
+            for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith(prefix)) keys.push(k); }
+            keys.forEach(k => localStorage.removeItem(k));
+            localStorage.removeItem(`ganso_last_subject_v2_${inst}`);
+            localStorage.removeItem('notas_docente_estado_v2');
+        } catch(_) {}
+        Auth.signOut();
+    });
     $('applyFiltersBtn').addEventListener('click', () => refreshStats());
 
     // ── Carga de datos ────────────────────────────────────────────

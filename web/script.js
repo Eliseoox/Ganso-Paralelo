@@ -145,12 +145,19 @@ function startApp() {
     });
 
     // ── Ciclo de vida (suspensión / APK) ─────────────────────────────────────
+    // visibilitychange es más confiable que beforeunload en mobile/Android/Electron:
+    // dispara cuando el usuario cambia de pestaña, bloquea la pantalla, o cierra la app.
+    // Combinado con enablePersistence (firebase-config.js), el write queda en IndexedDB
+    // aunque la página muera antes de que Firebase confirme la escritura en la nube.
     document.addEventListener("visibilitychange", () => {
-        if (typeof GansoLog === "undefined") return;
         if (document.visibilityState === "hidden") {
-            GansoLog.APP_SUSPEND({ subject: appState?.subject || null });
+            if (typeof GansoLog !== "undefined") GansoLog.APP_SUSPEND({ subject: appState?.subject || null });
+            if (hasData()) {
+                try { saveLocalState(false); } catch(_) {}
+                SyncModule.flush();
+            }
         } else {
-            GansoLog.APP_RESUME({ subject: appState?.subject || null });
+            if (typeof GansoLog !== "undefined") GansoLog.APP_RESUME({ subject: appState?.subject || null });
         }
     });
 }
@@ -410,6 +417,11 @@ async function handleLogout() {
             await DB.saveSubjectData(institutionId, appState.subject, snap, updatedAt);
         } catch (_) {}
     }
+    // Limpiar localStorage ANTES de cerrar sesión para evitar que el próximo usuario
+    // que abra el browser encuentre datos de esta sesión (ghost state en PCs compartidas).
+    // Es seguro: la escritura a Firestore ya fue esperada (await) arriba; cualquier
+    // write pendiente sin conexión vive en el IndexedDB de Firebase y sincroniza solo.
+    clearAllLocalSnapshots();
     try { sessionStorage.removeItem(INST_SESSION_KEY); } catch(_) {}
     if (firebaseMode && typeof Auth !== "undefined") {
         Auth.signOut();
@@ -1298,7 +1310,7 @@ function saveLocalState(updateTimestamp = true) {
         const key = storageKey(appState.subject);
         localStorage.setItem(key, snapshotJson);
         const written = localStorage.getItem(key);
-        if (written === null || written.length !== snapshotJson.length) {
+        if (written === null || written !== snapshotJson) {
             throw new Error("localStorage write verification failed");
         }
         if (appState.subject) {
@@ -1701,14 +1713,13 @@ function addStudents(event) {
 
     if (firebaseMode && institutionId && typeof DB !== "undefined") {
         setSyncStatus("Guardando en la nube…", "pending");
-        Promise.all(newStudents.map(s => DB.addStudentToAllSubjects(institutionId, course, s)))
-            .then(counts => {
-                const total = counts.reduce((a, b) => a + b, 0);
+        DB.addStudentsToAllSubjects(institutionId, course, newStudents)
+            .then(count => {
                 setSyncStatus("Guardado en la nube", "online");
-                if (total > 0) showToast(`${newStudents.length} alumno(s) guardado(s) en todas las materias.`);
+                if (count > 0) showToast(`${newStudents.length} alumno(s) guardado(s) en todas las materias.`);
             })
             .catch(err => {
-                console.warn("Firestore addStudent error:", err);
+                console.warn("Firestore addStudents error:", err);
                 setSyncStatus("Guardado local (sin nube)", "pending");
                 showToast("Alumno guardado localmente. Sin conexión a la nube.");
             });
