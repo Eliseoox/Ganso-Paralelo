@@ -29,6 +29,32 @@
             await fs().collection('institutions').doc(id).delete();
         },
 
+        // Quita la institución del campo institutionIds de todos los usuarios que la tenían.
+        // Se llama inmediatamente después de deleteInstitution para mantener coherencia.
+        async removeInstitutionFromAllUsers(institutionId) {
+            const [newFmt, oldFmt] = await Promise.all([
+                fs().collection('users').where('institutionIds', 'array-contains', institutionId).get(),
+                fs().collection('users').where('institutionId', '==', institutionId).get()
+            ]);
+            const map = new Map();
+            newFmt.docs.forEach(d => map.set(d.id, { id: d.id, ...d.data() }));
+            oldFmt.docs.forEach(d => { if (!map.has(d.id)) map.set(d.id, { id: d.id, ...d.data() }); });
+            const users = [...map.values()];
+            if (!users.length) return;
+            const batch = fs().batch();
+            users.forEach(u => {
+                const newIds = (u.institutionIds || []).filter(id => id !== institutionId);
+                const updates = {
+                    institutionIds: firebase.firestore.FieldValue.arrayRemove(institutionId),
+                };
+                if (u.institutionId === institutionId) {
+                    updates.institutionId = newIds[0] || null;
+                }
+                batch.set(fs().collection('users').doc(u.id), updates, { merge: true });
+            });
+            await batch.commit();
+        },
+
         // ── Usuarios ──────────────────────────────────────────────
         async getUsers(institutionId) {
             if (!institutionId) {

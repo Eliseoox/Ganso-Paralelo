@@ -163,7 +163,12 @@
 
     async function deleteInst(id) {
         if (!await confirmDialog(`¿Eliminar la institución "${id}"?\nNo se borran los datos de materias.`, { confirmText: 'Sí, eliminar', cancelText: 'Cancelar' })) return;
-        try { await DB.deleteInstitution(id); showToast('Institución eliminada.'); loadInstitutions(); }
+        try {
+            await DB.deleteInstitution(id);
+            await DB.removeInstitutionFromAllUsers(id);
+            showToast('Institución eliminada.');
+            loadInstitutions();
+        }
         catch(err) { showToast('Error: ' + err.message); }
     }
 
@@ -194,10 +199,17 @@
                         showToast('Ese correo ya tiene cuenta de acceso pero no tiene perfil en el sistema. Contactá al soporte.');
                         return;
                     }
-                    const fromInsts = Array.isArray(existing.institutionIds) && existing.institutionIds.length
-                        ? existing.institutionIds.join(', ')
-                        : (existing.institutionName || existing.institutionId || 'otra institución');
-                    if (!await confirmDialog(`"${email}" ya existe en: ${fromInsts}.\n¿Querés agregarlo a esta institución también?\n\nSe actualizarán nombre y rol. La contraseña no cambia.`, { confirmText: 'Sí, agregar', cancelText: 'Cancelar' })) return;
+                    // Verificar qué instituciones del usuario todavía existen en Firestore.
+                    // Si todas fueron eliminadas, agregar sin pedir confirmación.
+                    const userInstIds = Array.isArray(existing.institutionIds) && existing.institutionIds.length
+                        ? existing.institutionIds
+                        : (existing.institutionId ? [existing.institutionId] : []);
+                    let realInsts = [];
+                    try { realInsts = await DB.getInstitutionsForUser(userInstIds); } catch(_) {}
+                    if (realInsts.length > 0) {
+                        const fromInsts = realInsts.map(i => i.name || i.id).join(', ');
+                        if (!await confirmDialog(`"${email}" ya existe en: ${fromInsts}.\n¿Querés agregarlo a esta institución también?\n\nSe actualizarán nombre y rol. La contraseña no cambia.`, { confirmText: 'Sí, agregar', cancelText: 'Cancelar' })) return;
+                    }
                     await DB.addUserToInstitution(existing.id, selectedInstId, instName, { name, email, role });
                     showToast(`"${name}" agregado a esta institución correctamente.`);
                     $('addUserForm').reset();
