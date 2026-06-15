@@ -275,7 +275,7 @@
             const cloudTs = dbData.updatedAt
                 ? new Date(dbData.updatedAt).getTime()
                 : parseDateTime(dbData.lastSavedAt);
-            if (cloudTs > localTs) {
+            if (!localTs || cloudTs > localTs) {
                 _applyRemoteData(dbData);
                 if (dbData.updatedAt) _lastOwnUpdatedAt = dbData.updatedAt;
                 return true;

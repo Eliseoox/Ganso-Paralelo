@@ -726,9 +726,6 @@ function continueFromSaved() {
     }
     SyncModule.cancel();
     loadStateFromSnapshot(savedSnapshot);
-    // Re-aplicar overrides del snapshot (defensivo: asegura que removals/additions
-    // del propio snapshot se reflejen aunque no hayan sido guardados correctamente).
-    applyStudentOverrides(appState, appState.studentOverrides);
     activeStep  = 3;
     hasReviewed = false;
     hydrateControls(); renderAll(); renderSavedSession(); renderFlow(); updateDisabledState();
