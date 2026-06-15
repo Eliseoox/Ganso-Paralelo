@@ -43,7 +43,14 @@
             const map = new Map();
             newFmt.docs.forEach(d => map.set(d.id, { id: d.id, ...d.data() }));
             oldFmt.docs.forEach(d => { if (!map.has(d.id)) map.set(d.id, { id: d.id, ...d.data() }); });
-            return [...map.values()];
+            // Si el usuario tiene el campo institutionIds es autoritativo: un arrayRemove
+            // deja institutionIds:[] pero institutionId sin limpiar, haciendo que la query
+            // legacy lo devuelva igual. Este filtro lo excluye correctamente.
+            return [...map.values()].filter(u =>
+                Array.isArray(u.institutionIds)
+                    ? u.institutionIds.includes(institutionId)
+                    : u.institutionId === institutionId
+            );
         },
 
         async getUserByEmail(email) {
@@ -63,10 +70,20 @@
         },
 
         // Quita al usuario de una institución sin eliminar su perfil (arrayRemove).
+        // También actualiza institutionId (campo legacy) para evitar que la query
+        // legacy lo siga devolviendo después de la remoción.
         async removeUserFromInstitution(uid, institutionId) {
-            await fs().collection('users').doc(uid).set({
-                institutionIds: firebase.firestore.FieldValue.arrayRemove(institutionId)
-            }, { merge: true });
+            const doc = await fs().collection('users').doc(uid).get();
+            if (!doc.exists) return;
+            const data = doc.data();
+            const newIds = (data.institutionIds || []).filter(id => id !== institutionId);
+            const updates = {
+                institutionIds: firebase.firestore.FieldValue.arrayRemove(institutionId),
+            };
+            if (data.institutionId === institutionId) {
+                updates.institutionId = newIds[0] || null;
+            }
+            await fs().collection('users').doc(uid).set(updates, { merge: true });
         },
 
         // Obtiene los documentos de instituciones para una lista de IDs (multi-institución).
