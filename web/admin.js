@@ -259,7 +259,7 @@
                                         <option value="preceptoria" ${u.role==='preceptoria'?'selected':''}>Preceptoría</option>
                                     </select>
                                 </td>
-                                <td>${escHtml(Array.isArray(u.institutionIds) && u.institutionIds.length ? u.institutionIds.join(', ') : (u.institutionName||u.institutionId||'-'))}</td>
+                                <td>${escHtml(Array.isArray(u.institutionIds) && u.institutionIds.length ? u.institutionIds.join(', ') : (u.institutionId||u.institutionName||'-'))}</td>
                                 <td style="display:flex;gap:6px;">
                                     <button class="action-btn" data-action="save-role" data-uid="${escHtml(u.id)}">Guardar rol</button>
                                     <button class="action-btn danger" data-action="remove-user" data-uid="${escHtml(u.id)}" data-name="${escHtml(u.name||u.email)}">Quitar</button>
