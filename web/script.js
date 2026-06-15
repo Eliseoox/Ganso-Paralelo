@@ -541,7 +541,9 @@ async function confirmSubject(event) {
         if (hasData()) {
             setSyncStatus("Datos locales cargados", "online");
             // Consultar Firestore en background para detectar cambios desde otro dispositivo.
-            // Solo mostrar la oferta de carga si la nube tiene datos genuinamente más nuevos.
+            // Si la nube tiene datos genuinamente más nuevos, auto-aplicar con merge
+            // (en lugar de mostrar el botón manual "Cargar desde el sistema").
+            // _applyRemoteData preserva las ediciones locales más recientes mediante _mergeRecords.
             loadSubjectFromFirestore(subject).then(dbData => {
                 if (normalizeSubject(appState.subject) !== normalizeSubject(subject)) return;
                 if (!dbData || !dbData.courses || !dbData.courses.length) return;
@@ -550,7 +552,16 @@ async function confirmSubject(event) {
                     ? new Date(dbData.updatedAt).getTime()
                     : parseDateTime(dbData.lastSavedAt);
                 if (!localTs || cloudTs > localTs) {
-                    showDbDataBox(dbData);
+                    setSyncStatus("Actualizando...", "pending");
+                    SyncModule.applyRemoteData(dbData);
+                    activeStep  = 3;
+                    hasReviewed = false;
+                    renderFlow();
+                    updateDisabledState();
+                    if (dbData.updatedAt) SyncModule.setLastOwnUpdatedAt(dbData.updatedAt);
+                    setSyncStatus("Datos actualizados", "online");
+                    updateNotice("ready", `${subject} — datos actualizados.`, "Podés continuar con la carga de notas.");
+                    showToast(`Datos de "${subject}" actualizados automáticamente.`);
                 } else {
                     setSyncStatus("Datos locales actualizados", "online");
                 }
@@ -1178,6 +1189,7 @@ function renderFlow() {
 function setActiveStep(step) {
     if (!canAccessStep(step)) {
         if (step === 2 && !appState.subject) showToast("Primero seleccioná una materia.");
+        else if (step === 3 && typeof SyncModule !== "undefined" && SyncModule.hasPendingStructural()) showToast("Actualizando...");
         else if (step >= 3 && !hasData())    showToast("Primero cargá los datos.");
         return;
     }
@@ -1196,7 +1208,12 @@ function canAccessStep(step) {
     if (!isFlowPage()) return true;
     if (step === 1) return true;
     if (step === 2) return Boolean(appState.subject || elements.subjectInput?.value.trim());
-    if (step === 3) return hasData();
+    if (step === 3) {
+        // Bloquear Paso 3 si hay un cambio del sistema pendiente de aplicar.
+        // El polling en SyncModule lo aplica en cuanto el profesor deje de editar.
+        if (typeof SyncModule !== "undefined" && SyncModule.hasPendingStructural()) return false;
+        return hasData();
+    }
     if (step === 4) return hasData();
     return false;
 }

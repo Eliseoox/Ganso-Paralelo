@@ -444,6 +444,16 @@
             return fs().collection('subjectData')
                 .doc(docId(institutionId, subject))
                 .onSnapshot({ includeMetadataChanges: true }, callback, () => {});
+        },
+
+        // Listener a nivel colección: dispara cuando cualquier materia de la
+        // institución cambia. Usado por boletines y estadísticas para auto-refrescar
+        // sin que el usuario tenga que recargar manualmente.
+        // Retorna la función unsubscribe.
+        subscribeToInstitutionSubjects(institutionId, callback) {
+            return fs().collection('subjectData')
+                .where('institutionId', '==', institutionId)
+                .onSnapshot(callback, () => {});
         }
     };
 })();

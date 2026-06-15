@@ -5,12 +5,17 @@
     const FS_DEBOUNCE_MS = 300;
     const FS_MAX_RETRIES = 3;
 
-    let _fsWriteTimer    = null;
-    let _fsPendingSnap   = null;
-    let _fsRetryTimer    = null;
-    let _fsListener      = null;
+    let _fsWriteTimer     = null;
+    let _fsPendingSnap    = null;
+    let _fsRetryTimer     = null;
+    let _fsListener       = null;
     let _lastOwnUpdatedAt = null;
-    let _listenerFirst   = true;
+    let _listenerFirst    = true;
+
+    // Snapshot remoto encolado mientras el profesor edita notas.
+    // Se aplica automáticamente en cuanto deja de editar (polling cada 800ms).
+    let _pendingStructural      = null;
+    let _pendingStructuralTimer = null;
 
     function _doFirestoreSave(snap, updatedAt, attempt) {
         if (attempt === 0) {
@@ -124,6 +129,69 @@
         return { ...remoteData, records: mergedRecords };
     }
 
+    // Aplica un snapshot remoto sobre el estado actual preservando sobreescritura
+    // de alumnos e historial de sesión. Es la ruta compartida entre el auto-apply
+    // del listener (cuando el profesor no edita) y el auto-apply diferido (al terminar
+    // de editar), y el auto-apply inicial en confirmSubject.
+    function _applyRemoteData(remoteData) {
+        if (typeof GansoLog !== "undefined") GansoLog.REMOTE_APPLIED({ subject: remoteData.subject });
+        // Preservar overrides, historial y curso activo antes de reemplazar el estado.
+        const prevOverrides   = cloneData(appState.studentOverrides   || { additions: {}, removals: {} });
+        const prevHistoryRows = cloneData(appState.historyRows        || []);
+        const prevPendingHist = cloneData(appState.pendingHistoryRows || []);
+        const prevCourse = selectedCourse;
+        // CRÍTICO 3: fusionar registros por updatedAt antes de aplicar el estado
+        // remoto, para conservar ediciones locales más recientes que el snapshot.
+        const mergedData = _mergeRecords(appState, remoteData);
+        loadStateFromSnapshot(mergedData);
+        // Fusionar overrides locales con los del doc remoto, luego re-aplicar
+        const mergedOverrides = Utils.mergeOverrides(prevOverrides, appState.studentOverrides || { additions: {}, removals: {} });
+        applyStudentOverrides(appState, mergedOverrides);
+        // ALTO 2: restaurar historial local. Los docs de Firestore nunca incluyen
+        // historyRows (excluidos en saveSubjectData), por lo que loadStateFromSnapshot
+        // los deja vacíos. Restaurarlos evita perder el historial de la sesión actual.
+        appState.historyRows        = prevHistoryRows;
+        appState.pendingHistoryRows = prevPendingHist;
+        if (appState.courses.includes(prevCourse)) selectedCourse = prevCourse;
+        hydrateControls(); renderAll(); renderSavedSession(); renderFlow(); updateDisabledState();
+        try {
+            const snap = createSnapshot();
+            localStorage.setItem(storageKey(appState.subject), JSON.stringify(snap));
+            if (appState.subject) localStorage.setItem(lastSubjectKey(), appState.subject);
+            savedSnapshot = snap;
+            setSyncStatus("Sincronizado", "online");
+        } catch(_) { /* localStorage write failed — non-fatal */ }
+        if (elements.dbDataBox) elements.dbDataBox.classList.add("hidden");
+    }
+
+    // Inicia el timer de polling para auto-aplicar el cambio pendiente.
+    function _startStructuralPoll() {
+        clearTimeout(_pendingStructuralTimer);
+        _pendingStructuralTimer = setTimeout(_pollStructural, 800);
+    }
+
+    // Verifica si el profesor terminó de editar y aplica el snapshot encolado.
+    // Se re-agenda a sí mismo cada 800ms mientras siga con un input de nota enfocado.
+    function _pollStructural() {
+        _pendingStructuralTimer = null;
+        if (!_pendingStructural) return;
+        const hasFocusedInput = document.activeElement?.classList.contains("grade-cell-input");
+        if (hasFocusedInput) {
+            // Profesor todavía dentro de una celda de nota — esperar
+            _pendingStructuralTimer = setTimeout(_pollStructural, 800);
+            return;
+        }
+        const remoteData = _pendingStructural;
+        _pendingStructural = null;
+        _applyRemoteData(remoteData);
+        showToast("Actualizando: cambios del sistema aplicados.");
+        // updateDisabledState ya fue llamado por _applyRemoteData → renderFlow chain
+    }
+
+    function hasPendingStructural() {
+        return _pendingStructural !== null;
+    }
+
     function attach(subject) {
         detach();
         if (!firebaseMode || !institutionId || !subject || typeof DB === "undefined") return;
@@ -160,47 +228,30 @@
             const hasFocusedInput = document.activeElement?.classList.contains("grade-cell-input");
             const isEditing = _fsWriteTimer !== null || _fsPendingSnap !== null || _fsRetryTimer !== null || hasFocusedInput;
             if (!isEditing) {
-                if (typeof GansoLog !== "undefined") GansoLog.REMOTE_APPLIED({ subject: remoteData.subject, remoteTs, localTs });
-                // Preservar overrides, historial y curso activo antes de reemplazar el estado.
-                const prevOverrides   = cloneData(appState.studentOverrides   || { additions: {}, removals: {} });
-                const prevHistoryRows = cloneData(appState.historyRows        || []);
-                const prevPendingHist = cloneData(appState.pendingHistoryRows || []);
-                const prevCourse = selectedCourse;
-                // CRÍTICO 3: fusionar registros por updatedAt antes de aplicar el estado
-                // remoto, para conservar ediciones locales más recientes que el snapshot.
-                const mergedData = _mergeRecords(appState, remoteData);
-                loadStateFromSnapshot(mergedData);
-                // Fusionar overrides locales con los del doc remoto, luego re-aplicar
-                const mergedOverrides = Utils.mergeOverrides(prevOverrides, appState.studentOverrides || { additions: {}, removals: {} });
-                applyStudentOverrides(appState, mergedOverrides);
-                // ALTO 2: restaurar historial local. Los docs de Firestore nunca incluyen
-                // historyRows (excluidos en saveSubjectData), por lo que loadStateFromSnapshot
-                // los deja vacíos. Restaurarlos evita perder el historial de la sesión actual.
-                appState.historyRows        = prevHistoryRows;
-                appState.pendingHistoryRows = prevPendingHist;
-                if (appState.courses.includes(prevCourse)) selectedCourse = prevCourse;
-                hydrateControls(); renderAll(); renderSavedSession(); renderFlow(); updateDisabledState();
-                try {
-                    const snap = createSnapshot();
-                    localStorage.setItem(storageKey(appState.subject), JSON.stringify(snap));
-                    if (appState.subject) localStorage.setItem(lastSubjectKey(), appState.subject);
-                    savedSnapshot = snap;
-                    setSyncStatus("Sincronizado", "online");
-                } catch(_) { /* localStorage write failed — non-fatal */ }
-                if (elements.dbDataBox) elements.dbDataBox.classList.add("hidden");
+                // Auto-aplicar inmediatamente cuando el profesor no está editando.
+                _applyRemoteData(remoteData);
                 showToast("Notas actualizadas desde otro dispositivo.");
                 return;
             }
             if (typeof GansoLog !== "undefined") GansoLog.REMOTE_CONFLICT({ subject: remoteData.subject, remoteTs, localTs, reason: "user_editing" });
-            const boxAlreadyVisible = elements.dbDataBox && !elements.dbDataBox.classList.contains("hidden");
-            showDbDataBox(remoteData);
-            if (!boxAlreadyVisible) showToast("Otro dispositivo guardó cambios. Ir al Paso 2 para cargar.");
+            // Encolar el snapshot remoto en lugar de mostrar el dbDataBox manual.
+            // Se aplica automáticamente cuando el profesor deja de editar (polling).
+            // Si ya había un cambio encolado, el más reciente lo reemplaza.
+            _pendingStructural = remoteData;
+            setSyncStatus("Actualizando...", "pending");
+            _startStructuralPoll();
+            updateDisabledState(); // bloquear navegación al paso siguiente mientras espera
+            showToast("Hay cambios del sistema. Se aplicarán al terminar.");
         });
     }
 
     function detach() {
         if (_fsListener) { _fsListener(); _fsListener = null; }
         _listenerFirst = true;
+        // Limpiar cambio pendiente al cambiar de materia o cerrar sesión
+        clearTimeout(_pendingStructuralTimer);
+        _pendingStructuralTimer = null;
+        _pendingStructural      = null;
     }
 
     // Permite que script.js estampe el updatedAt propio en contextos fuera del módulo
@@ -209,5 +260,11 @@
         _lastOwnUpdatedAt = ts;
     }
 
-    window.SyncModule = { schedule, cancel, flush, attach, detach, setLastOwnUpdatedAt };
+    window.SyncModule = {
+        schedule, cancel, flush, attach, detach, setLastOwnUpdatedAt,
+        hasPendingStructural,
+        // Aplica un snapshot remoto sobre el estado local (merge + render + save).
+        // Usado por confirmSubject() para auto-cargar sin mostrar el dbDataBox manual.
+        applyRemoteData: _applyRemoteData,
+    };
 })();

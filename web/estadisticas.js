@@ -92,6 +92,21 @@
         Chart.defaults.color       = CHART_DEFAULTS.color;
 
         await loadData();
+
+        // Suscribirse a cambios en tiempo real de la colección de materias.
+        // Cuando el admin agrega/quita alumnos, las estadísticas se actualizan solas
+        // (2s de debounce para agrupar escrituras en batch).
+        if (typeof DB !== 'undefined' && DB.subscribeToInstitutionSubjects) {
+            let _firstSnap = true;
+            let _refreshTimer = null;
+            DB.subscribeToInstitutionSubjects(institutionId, () => {
+                if (_firstSnap) { _firstSnap = false; return; } // ignorar snapshot inicial
+                clearTimeout(_refreshTimer);
+                _refreshTimer = setTimeout(() => {
+                    if (document.visibilityState === 'visible') refreshData();
+                }, 2000);
+            });
+        }
     });
 
     $('logoutButton').addEventListener('click', () => {
