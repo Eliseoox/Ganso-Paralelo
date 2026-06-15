@@ -242,6 +242,21 @@ function createWindow() {
     return win;
 }
 
+// Bloquear segunda instancia: si el usuario intenta abrir la app dos veces,
+// enfocar la ventana existente en lugar de abrir una en blanco.
+const _gotLock = app.requestSingleInstanceLock();
+if (!_gotLock) {
+    app.quit();
+}
+app.on('second-instance', () => {
+    const windows = BrowserWindow.getAllWindows();
+    if (windows.length) {
+        const w = windows[0];
+        if (w.isMinimized()) w.restore();
+        w.focus();
+    }
+});
+
 app.whenReady().then(() => {
     const win = createWindow();
 

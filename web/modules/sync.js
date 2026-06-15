@@ -260,11 +260,38 @@
         _lastOwnUpdatedAt = ts;
     }
 
+    // Reconcilia el estado local contra Firestore para detectar cambios estructurales
+    // (altas/bajas de alumnos) que aún no llegaron por el listener. Llama a
+    // _applyRemoteData si el doc en la nube es más reciente que el snapshot local.
+    // Usado por continueFromSaved() para no cargar datos obsoletos del navegador.
+    async function reconcileWithFirestore(subject) {
+        if (!firebaseMode || !institutionId || !subject || typeof DB === "undefined") return false;
+        try {
+            const dbData = await loadSubjectFromFirestore(subject);
+            if (!dbData || !(dbData.courses || []).length) return false;
+            const norm = s => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
+            if (norm(appState.subject) !== norm(subject)) return false; // subject changed while fetching
+            const localTs = savedSnapshot ? parseDateTime(savedSnapshot.lastSavedAt) : 0;
+            const cloudTs = dbData.updatedAt
+                ? new Date(dbData.updatedAt).getTime()
+                : parseDateTime(dbData.lastSavedAt);
+            if (cloudTs > localTs) {
+                _applyRemoteData(dbData);
+                if (dbData.updatedAt) _lastOwnUpdatedAt = dbData.updatedAt;
+                return true;
+            }
+            return false;
+        } catch (_) { return false; }
+    }
+
     window.SyncModule = {
         schedule, cancel, flush, attach, detach, setLastOwnUpdatedAt,
         hasPendingStructural,
         // Aplica un snapshot remoto sobre el estado local (merge + render + save).
         // Usado por confirmSubject() para auto-cargar sin mostrar el dbDataBox manual.
         applyRemoteData: _applyRemoteData,
+        // Consulta Firestore y aplica si hay datos más nuevos (alta/baja de alumnos).
+        // Usado por continueFromSaved() para detectar cambios hechos desde el panel.
+        reconcileWithFirestore,
     };
 })();

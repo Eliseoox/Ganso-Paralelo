@@ -322,6 +322,9 @@ function bindEvents() {
     on(elements.importStudentsExcelBtn,  "click", () => elements.studentImportInput?.click());
     on(elements.studentImportInput,      "change", importStudentsFromExcel);
 
+    // BUG 3: seleccionar el texto del input al hacer focus para evitar concatenación
+    on(elements.subjectInput, "focus", () => { elements.subjectInput?.select(); });
+
     on(elements.headerToolsToggle, "click", toggleHeaderTools);
     document.addEventListener("click", e => {
         const wrap = document.getElementById("headerToolsWrap");
@@ -723,12 +726,30 @@ function continueFromSaved() {
     }
     SyncModule.cancel();
     loadStateFromSnapshot(savedSnapshot);
+    // Re-aplicar overrides del snapshot (defensivo: asegura que removals/additions
+    // del propio snapshot se reflejen aunque no hayan sido guardados correctamente).
+    applyStudentOverrides(appState, appState.studentOverrides);
     activeStep  = 3;
     hasReviewed = false;
     hydrateControls(); renderAll(); renderSavedSession(); renderFlow(); updateDisabledState();
-    setSyncStatus("Datos cargados", "online");
     updateNotice("ready", "Datos recuperados del navegador.", "Podés continuar con la carga de notas.");
     showToast("Datos recuperados.");
+
+    // Reconciliar contra Firestore en background: si hay alumnos dados de baja o alta
+    // desde el panel de admin que aún no llegaron al snapshot local, se aplican solos.
+    if (firebaseMode && institutionId && appState.subject) {
+        setSyncStatus("Verificando cambios del sistema...", "pending");
+        const subject = appState.subject;
+        SyncModule.reconcileWithFirestore(subject).then(applied => {
+            if (applied) {
+                showToast("Cambios del sistema aplicados automáticamente.");
+            } else {
+                setSyncStatus("Datos locales cargados", "online");
+            }
+        });
+    } else {
+        setSyncStatus("Datos cargados", "online");
+    }
 }
 
 async function startNewSession() {
