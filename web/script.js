@@ -171,14 +171,14 @@ function updateUserHeaderUI(profile) {
     if (nameEl) { nameEl.textContent = Auth.getName(); }
     if (roleEl) { roleEl.textContent = Auth.getRoleLabel(); roleEl.className = `role-tag ${currentUserRole}`; }
     if (instEl) { instEl.textContent = institutionName || "Seleccioná una institución"; }
-    if (elements.adminPanelLink && currentUserRole === 'admin') {
+    if (elements.adminPanelLink && ['admin','superadmin'].includes(currentUserRole)) {
         elements.adminPanelLink.style.display = "";
     }
-    // Estadísticas y boletines visibles para admin, preceptoría y profesor
+    // Estadísticas y boletines visibles para admin, superadmin, preceptoría y profesor
     const statsLink    = document.getElementById("statsLink");
     const boletinesLink = document.getElementById("boletinesLink");
-    if (statsLink    && ['admin','preceptoria','profesor'].includes(currentUserRole)) statsLink.style.display    = "";
-    if (boletinesLink && ['admin','preceptoria','profesor'].includes(currentUserRole)) boletinesLink.style.display = "";
+    if (statsLink    && ['admin','superadmin','preceptoria','profesor'].includes(currentUserRole)) statsLink.style.display    = "";
+    if (boletinesLink && ['admin','superadmin','preceptoria','profesor'].includes(currentUserRole)) boletinesLink.style.display = "";
 }
 
 function updateInstitutionDisplay() {
@@ -2417,7 +2417,7 @@ function updateDisabledState() {
     if (elements.goReviewButton) elements.goReviewButton.disabled = !editingStep || !dataReady || isSaving;
 
     const canManageStudents = !isSaving &&
-        (!firebaseMode || currentUserRole === 'admin' || currentUserRole === 'preceptoria');
+        (!firebaseMode || ['admin','superadmin','preceptoria'].includes(currentUserRole));
     [elements.newCourseName, elements.newCourseStudentsCount, elements.studentCourseSelect,
      elements.extraStudents, elements.addCourseButton, elements.addStudentsButton,
      elements.removeStudentCourseSelect, elements.removeStudentSelect, elements.removeStudentButton
@@ -2679,9 +2679,11 @@ async function showInstitutionPickerModal(onSelect) {
             let insts = [];
             if (typeof DB !== "undefined") {
                 const profile = typeof Auth !== "undefined" ? Auth.getProfile() : null;
-                if (!profile || profile.role === 'admin') {
+                // 'admin' es admin de institución (escopeado), no acceso global — solo
+                // 'superadmin' ve el listado completo de instituciones.
+                if (profile && profile.role === 'superadmin') {
                     insts = await DB.getInstitutions();
-                } else {
+                } else if (profile) {
                     const ids = profile.institutionIds || (profile.institutionId ? [profile.institutionId] : []);
                     insts = ids.length ? await DB.getInstitutionsForUser(ids) : [];
                 }

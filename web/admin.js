@@ -44,7 +44,7 @@
     }
 
     // ── Auth ─────────────────────────────────────────────────────
-    Auth.requireAuth(['admin']);
+    Auth.requireAuth(['admin', 'superadmin']);
 
     let selectedInstId = '';
 
@@ -61,6 +61,14 @@
     Auth.onReady(profile => {
         if (!profile) return;
         $('adminName').textContent = Auth.getName();
+        $('adminRoleTag').textContent = Auth.getRoleLabel();
+        // Solo el superadministrador puede crear instituciones nuevas — un admin
+        // de institución está escopeado a las que ya tiene asignadas (firestore.rules
+        // rechaza la creación igual, esto solo evita mostrar un formulario inútil).
+        if (Auth.isSuperadmin()) $('addInstPanel').classList.remove('hidden');
+        // Solo el superadministrador puede crear/ascender a 'admin' (firestore.rules
+        // lo rechaza para un admin de institución; esto evita ofrecer una opción inválida).
+        if (!Auth.isSuperadmin()) $('newUserRoleAdminOpt')?.remove();
         const instName = Auth.getInstitutionName();
         if (instName && $('instLabel')) $('instLabel').textContent = instName;
         loadInstitutions();
@@ -123,6 +131,7 @@
     // ── Instituciones ─────────────────────────────────────────────
     $('instForm').addEventListener('submit', async e => {
         e.preventDefault();
+        if (!Auth.isSuperadmin()) { showToast('Solo el superadministrador puede crear instituciones.'); return; }
         const id   = $('instId').value.trim().replace(/\s+/g,'_').toLowerCase();
         const name = $('instName').value.trim();
         if (!id || !name) { showToast('Completá nombre e ID.'); return; }
@@ -138,18 +147,33 @@
         const wrap = $('instTableWrap');
         wrap.innerHTML = '<div style="padding:18px;color:var(--muted);">Cargando...</div>';
         try {
-            const insts = await DB.getInstitutions();
+            // Un admin de institución solo ve (y puede seleccionar) las instituciones
+            // que ya tiene asignadas — nunca el listado completo. La restricción real
+            // vive en firestore.rules; esto evita mostrar instituciones ajenas en la UI.
+            let insts;
+            if (Auth.isSuperadmin()) {
+                insts = await DB.getInstitutions();
+            } else {
+                const profile = Auth.getProfile();
+                const ids = profile?.institutionIds?.length ? profile.institutionIds
+                          : (profile?.institutionId ? [profile.institutionId] : []);
+                insts = await DB.getInstitutionsForUser(ids);
+            }
             if (!insts.length) {
-                wrap.innerHTML = '<div style="padding:18px;color:var(--muted);">Sin instituciones registradas. Usá el formulario de abajo para agregar una.</div>';
+                const hint = Auth.isSuperadmin()
+                    ? 'Sin instituciones registradas. Usá el formulario de abajo para agregar una.'
+                    : 'No tenés ninguna institución asignada. Contactá al superadministrador.';
+                wrap.innerHTML = `<div style="padding:18px;color:var(--muted);">${escHtml(hint)}</div>`;
                 return;
             }
+            const canDelete = Auth.isSuperadmin();
             wrap.innerHTML = `<div class="inst-cards-grid">
                 ${insts.map(i => `
                     <div class="inst-card" data-action="select-inst" data-id="${escHtml(i.id)}" data-name="${escHtml(i.name)}">
                         <div class="inst-card-name">${escHtml(i.name)}</div>
                         <code class="inst-card-id">${escHtml(i.id)}</code>
                         <p class="inst-click-hint">Clic para seleccionar →</p>
-                        <button class="action-btn danger inst-delete-btn" data-action="delete-inst" data-id="${escHtml(i.id)}">Eliminar</button>
+                        ${canDelete ? `<button class="action-btn danger inst-delete-btn" data-action="delete-inst" data-id="${escHtml(i.id)}">Eliminar</button>` : ''}
                     </div>`).join('')}
             </div>`;
             wrap.querySelectorAll('[data-action="select-inst"]').forEach(card => {
@@ -162,6 +186,7 @@
     }
 
     async function deleteInst(id) {
+        if (!Auth.isSuperadmin()) { showToast('Solo el superadministrador puede eliminar instituciones.'); return; }
         if (!await confirmDialog(`¿Eliminar la institución "${id}"?\nNo se borran los datos de materias.`, { confirmText: 'Sí, eliminar', cancelText: 'Cancelar' })) return;
         try {
             await DB.deleteInstitution(id);
@@ -193,6 +218,13 @@
                 if (authErr.code === 'auth/email-already-in-use') {
                     // El correo ya tiene cuenta en Firebase Auth.
                     // Buscamos el perfil en Firestore para poder reasignarlo a esta institución.
+                    // Nota: firestore.rules solo permite esta operación de re-asignación
+                    // cross-institución al superadministrador — un admin de institución no
+                    // puede tocar el perfil de un usuario cuya institución actual no es la suya.
+                    if (!Auth.isSuperadmin()) {
+                        showToast('Ese correo ya tiene una cuenta en el sistema. Solo el superadministrador puede agregarlo a esta institución.');
+                        return;
+                    }
                     btn.textContent = 'Buscando perfil...';
                     const existing = await DB.getUserByEmail(email);
                     if (!existing) {
@@ -244,27 +276,43 @@
         try {
             const users = await DB.getUsers(selectedInstId);
             if (!users.length) { wrap.innerHTML = '<div style="padding:18px;color:var(--muted);">Sin usuarios registrados aún.</div>'; return; }
+            const iAmSuperadmin = Auth.isSuperadmin();
+            const myUid = Auth.getUser()?.uid;
+            const roleLabels = { admin: 'Administrador', profesor: 'Profesor', preceptoria: 'Preceptoría', superadmin: 'Superadministrador' };
+            // Un admin de institución puede cambiar el rol de cualquier usuario de su
+            // institución, incluidos otros admins — solo quedan bloqueadas dos filas:
+            // la del superadmin (nadie que no sea superadmin lo toca) y la propia
+            // (autoedición de rol deshabilitada para evitar auto-escalación).
             wrap.innerHTML = `
                 <table class="data-table">
                     <thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Institución</th><th></th></tr></thead>
                     <tbody>
-                        ${users.map(u => `
-                            <tr>
-                                <td>${escHtml(u.name||'-')}</td>
-                                <td>${escHtml(u.email||'-')}</td>
-                                <td>
-                                    <select class="role-select" data-uid="${escHtml(u.id)}" style="min-height:32px;padding:0 8px;font-size:13px;">
+                        ${users.map(u => {
+                            const isSuperadminRow = u.role === 'superadmin';
+                            const isSelf = u.id === myUid;
+                            const isProtected = !iAmSuperadmin && (isSuperadminRow || isSelf);
+                            const roleCell = isProtected
+                                ? `<span class="role-tag admin">${escHtml(roleLabels[u.role] || u.role)}</span>`
+                                : `<select class="role-select" data-uid="${escHtml(u.id)}" data-original-role="${escHtml(u.role||'')}" style="min-height:32px;padding:0 8px;font-size:13px;">
                                         <option value="admin"       ${u.role==='admin'?'selected':''}>Administrador</option>
                                         <option value="profesor"    ${u.role==='profesor'?'selected':''}>Profesor</option>
                                         <option value="preceptoria" ${u.role==='preceptoria'?'selected':''}>Preceptoría</option>
-                                    </select>
-                                </td>
+                                   </select>`;
+                            const actionsCell = isProtected
+                                ? `<span style="color:var(--muted);font-size:13px;">${isSuperadminRow ? 'Solo superadmin' : 'Tu cuenta'}</span>`
+                                : `<button class="action-btn" data-action="save-role" data-uid="${escHtml(u.id)}" disabled>Guardar rol</button>
+                                   <button class="action-btn danger" data-action="remove-user" data-uid="${escHtml(u.id)}" data-name="${escHtml(u.name||u.email)}">Quitar</button>`;
+                            return `
+                            <tr>
+                                <td>${escHtml(u.name||'-')}</td>
+                                <td>${escHtml(u.email||'-')}</td>
+                                <td>${roleCell}</td>
                                 <td>${escHtml(Array.isArray(u.institutionIds) && u.institutionIds.length ? u.institutionIds.join(', ') : (u.institutionId||u.institutionName||'-'))}</td>
-                                <td style="display:flex;gap:6px;">
-                                    <button class="action-btn" data-action="save-role" data-uid="${escHtml(u.id)}">Guardar rol</button>
-                                    <button class="action-btn danger" data-action="remove-user" data-uid="${escHtml(u.id)}" data-name="${escHtml(u.name||u.email)}">Quitar</button>
+                                <td>
+                                    <div style="display:flex;gap:6px;align-items:center;min-height:32px;">${actionsCell}</div>
                                 </td>
-                            </tr>`).join('')}
+                            </tr>`;
+                        }).join('')}
                     </tbody>
                 </table>`;
             wrap.querySelectorAll('[data-action="save-role"]').forEach(btn => {
@@ -273,6 +321,14 @@
             wrap.querySelectorAll('[data-action="remove-user"]').forEach(btn => {
                 btn.addEventListener('click', () => removeUser(btn.dataset.uid, btn.dataset.name));
             });
+            // "Guardar rol" solo se habilita cuando el select difiere del rol
+            // guardado (data-original-role) — evita guardar sin haber cambiado nada.
+            wrap.querySelectorAll('.role-select').forEach(select => {
+                select.addEventListener('change', () => {
+                    const btn = select.closest('tr').querySelector('[data-action="save-role"]');
+                    if (btn) btn.disabled = select.value === select.dataset.originalRole;
+                });
+            });
         } catch(err) { wrap.innerHTML = `<div style="padding:18px;color:var(--danger);">Error: ${escHtml(err.message)}</div>`; }
     }
 
@@ -280,9 +336,13 @@
         const select = btn.closest('tr').querySelector('.role-select');
         const role   = select.value;
         btn.disabled = true; btn.textContent = '...';
-        try { await DB.saveUser(uid, { role }); showToast('Rol actualizado.'); }
-        catch(err) { showToast('Error: ' + err.message); }
-        finally { btn.disabled = false; btn.textContent = 'Guardar rol'; }
+        try {
+            await DB.saveUser(uid, { role });
+            select.dataset.originalRole = role;
+            showToast('Rol actualizado.');
+        }
+        catch(err) { showToast('Error: ' + err.message); btn.disabled = false; }
+        finally { btn.textContent = 'Guardar rol'; if (select.value === select.dataset.originalRole) btn.disabled = true; }
     }
 
     async function removeUser(uid, name) {

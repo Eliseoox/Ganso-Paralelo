@@ -132,7 +132,7 @@
         });
 
         function redirectByRole(role) {
-            window.location.href = role === 'admin' ? 'admin.html' : 'index.html';
+            window.location.href = (role === 'admin' || role === 'superadmin') ? 'admin.html' : 'index.html';
         }
 
         // Siempre cerrar sesión al mostrar login (Electron, web y APK).

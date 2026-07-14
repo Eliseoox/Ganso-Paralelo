@@ -31,7 +31,7 @@
             <div class="user-info">
                 <div class="user-pill">
                     <span id="adminName">Cargando...</span>
-                    <span class="role-tag admin">Admin</span>
+                    <span class="role-tag admin" id="adminRoleTag">Admin</span>
                 </div>
             </div>
             <a class="secondary-button nav-button dark" href="estadisticas.html">Estadísticas</a>
@@ -58,7 +58,7 @@
                 <div style="padding:18px;color:var(--muted);">Cargando...</div>
             </div>
 
-            <details class="collapsible-panel" style="margin-top:16px;">
+            <details class="collapsible-panel hidden" id="addInstPanel" style="margin-top:16px;">
                 <summary>+ Agregar nueva institución</summary>
                 <form id="instForm">
                     <label>
@@ -122,7 +122,7 @@
                                 <select id="newUserRole">
                                     <option value="profesor">Profesor</option>
                                     <option value="preceptoria">Preceptoría</option>
-                                    <option value="admin">Administrador</option>
+                                    <option value="admin" id="newUserRoleAdminOpt">Administrador</option>
                                 </select>
                             </label>
                             <button class="primary-button" type="submit" id="addUserBtn">Crear usuario</button>

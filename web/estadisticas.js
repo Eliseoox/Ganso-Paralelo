@@ -69,7 +69,7 @@
     }
 
     // ── Inicio ────────────────────────────────────────────────────
-    Auth.requireAuth(['admin', 'preceptoria', 'profesor']);
+    Auth.requireAuth(['admin', 'superadmin', 'preceptoria', 'profesor']);
 
     Auth.onReady(async (profile) => {
         if (!profile) return;
@@ -80,7 +80,7 @@
         if (pill)   pill.style.display = '';
         if (nameEl) nameEl.textContent = Auth.getName();
         if (roleEl) { roleEl.textContent = Auth.getRoleLabel(); roleEl.className = `role-tag ${profile.role}`; }
-        if (profile.role === 'admin') { const l = $('adminLink'); if(l) l.style.display = ''; }
+        if (profile.role === 'admin' || profile.role === 'superadmin') { const l = $('adminLink'); if(l) l.style.display = ''; }
 
         const saved = getSessionInst();
         if (!saved) { window.location.href = 'index.html'; return; }

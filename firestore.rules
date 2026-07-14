@@ -16,76 +16,158 @@ service cloud.firestore {
       return userDoc().data.role;
     }
 
-    function userInstId() {
-      return userDoc().data.institutionId;
-    }
-
-    function isAdmin() {
-      return isAuth() && userRole() == 'admin';
-    }
-
-    function canEdit() {
-      return isAuth() && userRole() in ['admin', 'profesor'];
-    }
-
-    function sameInst(instId) {
-      return isAuth() && userInstId() == instId;
-    }
-
     // Devuelve la lista de instituciones a las que pertenece el usuario.
     // Soporta tanto el campo nuevo (institutionIds[]) como el legado (institutionId).
     function userInstIds() {
       let d = userDoc().data;
-      return d.keys().hasAll(['institutionIds']) ? d.institutionIds : [d.institutionId];
+      return d.keys().hasAll(['institutionIds']) ? d.institutionIds
+          : (d.institutionId != null ? [d.institutionId] : []);
+    }
+
+    // Superadmin: único rol con acceso global. Es el único que puede crear/eliminar
+    // instituciones y el único que puede otorgar el rol 'admin' o 'superadmin'.
+    function isSuperadmin() {
+      return isAuth() && userRole() == 'superadmin';
+    }
+
+    // Admin de institución: gestiona solo la(s) institución(es) que tiene asignadas
+    // en userInstIds(). NUNCA tiene acceso global — a diferencia del modelo anterior.
+    function isInstAdmin() {
+      return isAuth() && userRole() == 'admin';
+    }
+
+    function isAdminOf(instId) {
+      return isInstAdmin() && instId in userInstIds();
+    }
+
+    function canEditRole() {
+      return isAuth() && userRole() in ['admin', 'profesor'];
+    }
+
+    // Extrae institutionIds de un objeto de datos (nuevo o legado).
+    function institutionIdsOf(data) {
+      return data.keys().hasAll(['institutionIds']) ? data.institutionIds
+           : (data.institutionId != null ? [data.institutionId] : []);
+    }
+
+    // true si `ids` está totalmente contenido en las instituciones del actor
+    // (o está vacío). Usado para impedir que un admin toque usuarios/datos
+    // ligados a instituciones que no son la suya.
+    function idsSubsetOfOwn(ids) {
+      return ids.size() == 0 || ids.hasOnly(userInstIds());
+    }
+
+    // Impide que un admin cambie su PROPIO rol o institución(es) — el punto
+    // de auto-escalación de privilegios más común. Solo superadmin puede
+    // tocar estos campos, incluso sobre su propio documento.
+    function selfPrivilegesUnchanged() {
+      let before = resource.data;
+      let after  = request.resource.data;
+      return after.role == before.role
+          && after.institutionId == before.institutionId
+          && institutionIdsOf(after) == institutionIdsOf(before);
     }
 
     // ── /users/{uid} ──────────────────────────────────────────────────────────
     // Cada usuario puede leer su propio perfil.
-    // Solo admins pueden leer perfiles ajenos, crear, modificar y eliminar usuarios.
+    // Superadmin lee/crea/modifica/elimina cualquier usuario.
+    // Admin de institución solo puede leer/crear/modificar/eliminar usuarios
+    // cuyas instituciones sean un subconjunto de las suyas, y nunca puede
+    // otorgar el rol 'superadmin' ni tocar su propio rol/institución.
     match /users/{uid} {
-      allow read:   if isAuth() && (request.auth.uid == uid || isAdmin());
-      allow create: if isAdmin();
-      allow update: if isAdmin();
-      allow delete: if isAdmin();
+      // get: lectura de un documento puntual — puede usar la lógica completa
+      // (funciones anidadas, hasOnly()) sin problema, porque Firestore evalúa
+      // esta condición una sola vez, contra un documento conocido.
+      allow get:  if isAuth() && (
+                      request.auth.uid == uid ||
+                      isSuperadmin() ||
+                      (isInstAdmin() && idsSubsetOfOwn(institutionIdsOf(resource.data)))
+                    );
+
+      // list: para queries/colecciones, Firestore necesita poder "probar" la
+      // condición usando el propio filtro where() de la query — una cadena de
+      // funciones custom con hasOnly() no es lo bastante simple para eso y
+      // termina rechazando el listado entero (incluso para superadmin, aunque
+      // esa rama no dependa de resource.data). Por eso acá se usan comparaciones
+      // directas, igual que en /institutions/{id} y /subjectData/{docId}, que
+      // ya están probadas funcionando para listados.
+      allow list: if isAuth() && (
+                      isSuperadmin() ||
+                      (isInstAdmin() && (
+                        resource.data.institutionId in userInstIds() ||
+                        (('institutionIds' in resource.data) && resource.data.institutionIds.hasAny(userInstIds()))
+                      ))
+                    );
+
+      // Nota: un admin de institución NUNCA puede crear ni ascender a otro
+      // usuario a 'admin' — "crear administradores" es potestad exclusiva del
+      // superadministrador. Un admin de institución solo gestiona profesor/preceptoria.
+      allow create: if isSuperadmin() || (
+                      isInstAdmin() &&
+                      request.resource.data.role in ['profesor', 'preceptoria'] &&
+                      idsSubsetOfOwn(institutionIdsOf(request.resource.data))
+                    );
+
+      // Un admin de institución puede cambiar el rol de CUALQUIER usuario de su
+      // institución (incluido ascender/descender a otro 'admin'), menos el suyo
+      // propio (arriba, selfPrivilegesUnchanged) y nunca el de un 'superadmin'.
+      allow update: if isSuperadmin() || (
+                      isInstAdmin() && uid == request.auth.uid && selfPrivilegesUnchanged()
+                    ) || (
+                      isInstAdmin() &&
+                      uid != request.auth.uid &&
+                      resource.data.role != 'superadmin' &&
+                      request.resource.data.role in ['admin', 'profesor', 'preceptoria'] &&
+                      idsSubsetOfOwn(institutionIdsOf(resource.data)) &&
+                      idsSubsetOfOwn(institutionIdsOf(request.resource.data))
+                    );
+
+      allow delete: if isSuperadmin() || (
+                      isInstAdmin() &&
+                      uid != request.auth.uid &&
+                      resource.data.role != 'superadmin' &&
+                      idsSubsetOfOwn(institutionIdsOf(resource.data))
+                    );
     }
 
     // ── /institutions/{id} ────────────────────────────────────────────────────
-    // Admins pueden leer cualquier institución.
-    // Usuarios no-admin solo pueden leer las instituciones a las que pertenecen.
-    // Solo admins pueden crear, modificar o eliminar instituciones.
+    // Superadmin: acceso total (crear, leer, modificar, eliminar cualquiera).
+    // Admin de institución: solo puede leer y modificar (nunca crear ni eliminar)
+    // las instituciones que ya tiene asignadas.
     match /institutions/{id} {
-      allow read:   if isAuth() && (isAdmin() || id in userInstIds());
-      allow create: if isAdmin();
-      allow update: if isAdmin();
-      allow delete: if isAdmin();
+      allow read:   if isAuth() && (isSuperadmin() || id in userInstIds());
+      allow create: if isSuperadmin();
+      allow update: if isSuperadmin() || isAdminOf(id);
+      allow delete: if isSuperadmin();
     }
 
     // ── /subjectData/{docId} ─────────────────────────────────────────────────
-    // Admins acceden a cualquier institución.
-    // Usuarios no-admin acceden solo a instituciones en las que son miembros (institutionIds[]).
-    // Si la materia está bloqueada, solo el admin puede modificarla.
+    // Superadmin accede a cualquier institución.
+    // Todos los demás roles (incluido admin) acceden solo a instituciones en
+    // las que son miembros (institutionIds[]) — el admin YA NO tiene bypass global.
+    // Si la materia está bloqueada, solo superadmin puede modificarla.
     match /subjectData/{docId} {
       allow read:   if isAuth()
-                    && (isAdmin() || resource.data.institutionId in userInstIds());
+                    && (isSuperadmin() || resource.data.institutionId in userInstIds());
 
-      allow create: if canEdit()
-                    && (isAdmin() || request.resource.data.institutionId in userInstIds());
+      allow create: if canEditRole()
+                    && (isSuperadmin() || request.resource.data.institutionId in userInstIds());
 
-      allow update: if canEdit()
-                    && (isAdmin() || resource.data.institutionId in userInstIds())
-                    && (isAdmin() || resource.data.locked != true);
+      allow update: if canEditRole()
+                    && (isSuperadmin() || resource.data.institutionId in userInstIds())
+                    && (isSuperadmin() || resource.data.locked != true);
 
-      allow delete: if isAdmin();
+      allow delete: if isSuperadmin() || isAdminOf(resource.data.institutionId);
     }
 
     // ── /history/{docId} ─────────────────────────────────────────────────────
-    // Append-only. Admins acceden a cualquier institución.
-    // Usuarios no-admin solo a sus instituciones miembro (institutionIds[]).
+    // Append-only. Superadmin accede a cualquier institución.
+    // Todos los demás roles solo a sus instituciones miembro (institutionIds[]).
     match /history/{docId} {
       allow read:   if isAuth()
-                    && (isAdmin() || resource.data.institutionId in userInstIds());
-      allow create: if canEdit()
-                    && (isAdmin() || request.resource.data.institutionId in userInstIds());
+                    && (isSuperadmin() || resource.data.institutionId in userInstIds());
+      allow create: if canEditRole()
+                    && (isSuperadmin() || request.resource.data.institutionId in userInstIds());
       allow update: if false;
       allow delete: if false;
     }

@@ -96,16 +96,22 @@
 
         getUser()          { return _user; },
         getProfile()       { return _profile; },
-        isAdmin()          { return _profile?.role === 'admin'; },
+        isSuperadmin()     { return _profile?.role === 'superadmin'; },
+        // superadmin es superset de los permisos de admin (bypass de bloqueo de
+        // materia, links de UI de admin, etc.) — por eso isAdmin() acepta ambos.
+        // Para lógica que necesita distinguir el rol exacto, usar isSuperadmin().
+        isAdmin()          { return _profile?.role === 'admin' || _profile?.role === 'superadmin'; },
         isProfesor()       { return _profile?.role === 'profesor'; },
         isPreceptoria()    { return _profile?.role === 'preceptoria'; },
+        // Nota: 'admin' aquí es admin de institución (escopeado), no acceso global.
+        // El control de acceso real vive en firestore.rules, no en este helper.
         canEdit()          { return ['admin', 'profesor'].includes(_profile?.role); },
         getInstitutionId() { return _profile?.institutionId || ''; },
         getInstitutionName() { return _profile?.institutionName || ''; },
         getName()          { return _profile?.name || _user?.email || ''; },
         getRole()          { return _profile?.role || ''; },
         getRoleLabel()     {
-            const labels = { admin: 'Administrador', profesor: 'Profesor', preceptoria: 'Preceptoría' };
+            const labels = { superadmin: 'Superadministrador', admin: 'Administrador', profesor: 'Profesor', preceptoria: 'Preceptoría' };
             return labels[_profile?.role] || _profile?.role || '';
         }
     };
