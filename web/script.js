@@ -123,6 +123,15 @@ function startApp() {
             try { saveLocalState(false); } catch(_) {}
             SyncModule.flush();
         }
+        // Si el último guardado a la nube falló (se agotaron los reintentos),
+        // advertir SIEMPRE al cerrar/navegar — incluso si es _gansoNavAway —
+        // porque el riesgo es que el usuario cambie de dispositivo antes de
+        // que la nota llegue a Firestore. Un logout intencional no advierte.
+        if (window._gansoUnsavedToCloud && !window._gansoLogout) {
+            e.preventDefault();
+            e.returnValue = "";
+            return;
+        }
         if (window._gansoLogout || window._gansoNavAway || !hasData()) return;
         e.preventDefault();
         e.returnValue = "";
@@ -2766,6 +2775,52 @@ function setSyncStatus(text, type) {
     elements.syncStatus.textContent = text;
     elements.syncStatus.classList.remove("online", "error", "pending");
     if (type) elements.syncStatus.classList.add(type);
+}
+
+// Banner persistente (no se autooculta) para cuando se agotan los reintentos
+// de guardado en Firestore. Los datos siguen a salvo en localStorage/IndexedDB;
+// esto solo hace visible que todavía no llegaron a la nube.
+function showCloudSaveFailedBanner() {
+    window._gansoUnsavedToCloud = true;
+    let banner = document.getElementById("cloudSaveFailedBanner");
+    if (!banner) {
+        banner = document.createElement("div");
+        banner.id = "cloudSaveFailedBanner";
+        banner.setAttribute("role", "alert");
+        banner.style.position = "fixed";
+        banner.style.left = "0";
+        banner.style.right = "0";
+        banner.style.bottom = "0";
+        banner.style.zIndex = "99999";
+        banner.style.background = "#b91c1c";
+        banner.style.color = "#ffffff";
+        banner.style.padding = "12px 16px";
+        banner.style.display = "flex";
+        banner.style.alignItems = "center";
+        banner.style.justifyContent = "space-between";
+        banner.style.gap = "12px";
+        banner.style.flexWrap = "wrap";
+        banner.style.fontSize = "14px";
+        banner.style.fontWeight = "600";
+        banner.style.boxShadow = "0 -2px 10px rgba(0,0,0,0.25)";
+        banner.innerHTML =
+            '<span style="flex:1 1 260px;">Las notas se guardaron en ESTE dispositivo pero todavía NO se subieron a la nube. Revisá tu conexión — se reintentará solo al reconectar.</span>' +
+            '<button type="button" id="cloudSaveFailedBannerBtn" style="flex:0 0 auto;background:#ffffff;color:#b91c1c;border:none;border-radius:6px;padding:8px 14px;font-weight:800;cursor:pointer;">Entendido</button>';
+        document.body.appendChild(banner);
+        // "Entendido" solo oculta el banner — no borra datos ni limpia
+        // window._gansoUnsavedToCloud, así que beforeunload sigue advirtiendo
+        // hasta que el guardado en la nube realmente tenga éxito.
+        banner.querySelector("#cloudSaveFailedBannerBtn").addEventListener("click", () => {
+            banner.style.display = "none";
+        });
+    }
+    banner.style.display = "flex";
+}
+
+function clearCloudSaveFailedBanner() {
+    window._gansoUnsavedToCloud = false;
+    const banner = document.getElementById("cloudSaveFailedBanner");
+    if (banner) banner.style.display = "none";
 }
 
 function updateNotice(type, title, detail) {

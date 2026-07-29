@@ -27,6 +27,7 @@
             .then(() => {
                 _fsRetryTimer = null;
                 setSyncStatus("Guardado en la nube", "online");
+                if (typeof clearCloudSaveFailedBanner === "function") clearCloudSaveFailedBanner();
                 if (typeof GansoLog !== "undefined") GansoLog.SAVE_SUCCESS({ subject: snap.subject, updatedAt, attempt });
             })
             .catch(err => {
@@ -49,7 +50,8 @@
                         _doFirestoreSave(snap, updatedAt, attempt + 1);
                     }, delay);
                 } else {
-                    setSyncStatus("Guardado local (sin nube)", "pending");
+                    setSyncStatus("Guardado local (sin nube)", "error");
+                    if (typeof showCloudSaveFailedBanner === "function") showCloudSaveFailedBanner();
                 }
             });
     }
