@@ -22,7 +22,9 @@ function isTransientFsError(err) {
 // una pequeña espera entre intentos. Si el error no es transitorio (ej. el
 // archivo realmente no existe, ENOENT), no reintenta — deja que continúe
 // el flujo normal (express.static se encargará de devolver el 404 de siempre).
-async function waitForFileReadable(absPath, retries = 6, delayMs = 250) {
+// Tope de 12s: confirmado en una PC real que 1.5s no alcanzaba — el
+// antivirus tardaba más que eso en soltar el archivo recién copiado.
+async function waitForFileReadable(absPath, retries = 24, delayMs = 500) {
     for (let i = 0; i < retries; i++) {
         try {
             const fh = await fsp.open(absPath, 'r');
