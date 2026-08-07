@@ -3,11 +3,37 @@ const express  = require('express');
 const http     = require('http');
 const path     = require('path');
 const fs       = require('fs');
+const fsp      = fs.promises;
 const nodemailer = require('nodemailer');
 
 const PORT = 3737;
 let server = null;
 let serverReady = false;
+
+// Errores de sistema de archivos transitorios en Windows (ej. un antivirus
+// escaneando el archivo en tiempo real justo cuando se lo pidió, típico con
+// archivos recién copiados desde un pendrive) — no significan que el archivo
+// no exista, solo que en ESE instante el OS negó el acceso. Reintentables.
+function isTransientFsError(err) {
+    return !!err && (err.code === 'EPERM' || err.code === 'EBUSY' || err.code === 'EACCES');
+}
+
+// Espera hasta que un archivo se pueda abrir para lectura, reintentando con
+// una pequeña espera entre intentos. Si el error no es transitorio (ej. el
+// archivo realmente no existe, ENOENT), no reintenta — deja que continúe
+// el flujo normal (express.static se encargará de devolver el 404 de siempre).
+async function waitForFileReadable(absPath, retries = 6, delayMs = 250) {
+    for (let i = 0; i < retries; i++) {
+        try {
+            const fh = await fsp.open(absPath, 'r');
+            await fh.close();
+            return;
+        } catch (err) {
+            if (!isTransientFsError(err)) return;
+            await new Promise(r => setTimeout(r, delayMs));
+        }
+    }
+}
 
 let _transporter = null;
 let _transporterUser = null;
@@ -98,6 +124,25 @@ function startServer() {
                 "frame-src 'none';"
             );
             next();
+        });
+
+        // Antes de servir cualquier archivo estático, si está momentáneamente
+        // bloqueado (antivirus escaneándolo, recién copiado desde un pendrive,
+        // etc.) esperamos a que se libere en vez de dejar que express.static
+        // tire un 500. Si el archivo no existe, no hace nada distinto (deja
+        // que express.static siga con su comportamiento normal de 404).
+        webApp.use(async (req, res, next) => {
+            try {
+                if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+                const absPath = path.join(__dirname, 'app', decodeURIComponent(req.path));
+                let stat;
+                try { stat = fs.statSync(absPath); } catch (_) { return next(); }
+                if (!stat.isFile()) return next();
+                await waitForFileReadable(absPath);
+                next();
+            } catch (_) {
+                next(); // cualquier error inesperado acá no debe colgar la request
+            }
         });
 
         webApp.use(express.static(path.join(__dirname, 'app'), {
