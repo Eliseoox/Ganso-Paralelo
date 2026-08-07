@@ -18,18 +18,30 @@ function isTransientFsError(err) {
     return !!err && (err.code === 'EPERM' || err.code === 'EBUSY' || err.code === 'EACCES');
 }
 
-// Espera hasta que un archivo se pueda abrir para lectura, reintentando con
-// una pequeña espera entre intentos. Si el error no es transitorio (ej. el
-// archivo realmente no existe, ENOENT), no reintenta — deja que continúe
-// el flujo normal (express.static se encargará de devolver el 404 de siempre).
+// Espera hasta que un archivo se pueda leer, reintentando tanto el stat()
+// como el open() — un bloqueo transitorio (antivirus, copia en curso) puede
+// hacer fallar CUALQUIERA de los dos, no solo el open(). Si en algún punto
+// el error es "no existe" (ENOENT) o es una carpeta, corta al toque sin
+// esperar — deja que express.static siga con su comportamiento normal
+// (404, servir index.html de la carpeta, etc.).
 // Tope de 12s: confirmado en una PC real que 1.5s no alcanzaba — el
 // antivirus tardaba más que eso en soltar el archivo recién copiado.
 async function waitForFileReadable(absPath, retries = 24, delayMs = 500) {
     for (let i = 0; i < retries; i++) {
+        let stat;
+        try {
+            stat = fs.statSync(absPath);
+        } catch (err) {
+            if (!isTransientFsError(err)) return; // ENOENT u otro error real: no esperar
+            await new Promise(r => setTimeout(r, delayMs));
+            continue;
+        }
+        if (!stat.isFile()) return; // carpetas u otros casos: dejar que express.static decida
+
         try {
             const fh = await fsp.open(absPath, 'r');
             await fh.close();
-            return;
+            return; // se pudo abrir: liberado
         } catch (err) {
             if (!isTransientFsError(err)) return;
             await new Promise(r => setTimeout(r, delayMs));
@@ -137,9 +149,10 @@ function startServer() {
             try {
                 if (req.method !== 'GET' && req.method !== 'HEAD') return next();
                 const absPath = path.join(__dirname, 'app', decodeURIComponent(req.path));
-                let stat;
-                try { stat = fs.statSync(absPath); } catch (_) { return next(); }
-                if (!stat.isFile()) return next();
+                // waitForFileReadable() ya hace su propio stat()+open() con
+                // reintentos; no lo duplicamos acá (ese chequeo repetido era
+                // justamente el bug: si el stat() fallaba por el mismo bloqueo
+                // transitorio, se cortaba antes de llegar a esperar nada).
                 await waitForFileReadable(absPath);
                 next();
             } catch (_) {
