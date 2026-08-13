@@ -47,7 +47,7 @@ service cloud.firestore {
     // Extrae institutionIds de un objeto de datos (nuevo o legado).
     function institutionIdsOf(data) {
       return data.keys().hasAll(['institutionIds']) ? data.institutionIds
-           : (data.institutionId != null ? [data.institutionId] : []);
+          : (data.institutionId != null ? [data.institutionId] : []);
     }
 
     // true si `ids` está totalmente contenido en las instituciones del actor
