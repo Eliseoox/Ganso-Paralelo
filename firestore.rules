@@ -153,9 +153,16 @@ service cloud.firestore {
       allow create: if canEditRole()
                     && (isSuperadmin() || request.resource.data.institutionId in userInstIds());
 
+      // resource.data.get('locked', false) en vez de resource.data.locked:
+      // documentos creados sin pasar por initializeSubject() (ej. altas vía
+      // Excel/muestra desde la pantalla del docente) nunca tienen el campo
+      // 'locked' seteado. Acceder directo a un campo inexistente hace que la
+      // regla falle su evaluación entera (se deniega el update), aunque el
+      // panel de admin los muestre como "Editable". get(key, default) evita
+      // ese error y trata la ausencia del campo como "no bloqueado".
       allow update: if canEditRole()
                     && (isSuperadmin() || resource.data.institutionId in userInstIds())
-                    && (isSuperadmin() || resource.data.locked != true);
+                    && (isSuperadmin() || resource.data.get('locked', false) != true);
 
       allow delete: if isSuperadmin() || isAdminOf(resource.data.institutionId);
     }
