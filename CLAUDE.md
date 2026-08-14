@@ -8,8 +8,9 @@ All commands run from `ejecutable/electron/`:
 
 ```bash
 npm run electron:start      # dev: sync web/ → app/, then launch Electron
-npm run electron:make       # build portable .exe (electron-packager)
-npm run build:installer     # build installer .exe (electron-builder)
+npm run electron:make       # build portable .exe (electron-packager, loose-files folder)
+npm run build:win           # build NSIS installer + self-contained portable .exe (electron-builder) → dist-installer/
+npm run build:installer     # alias of build:win, kept for backward compatibility
 node sync.js                # copy web/ → electron/app/ manually
 ```
 

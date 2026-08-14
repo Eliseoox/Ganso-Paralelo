@@ -20,12 +20,14 @@
     "electron:start": "node sync.js && electron .",
     "electron:make": "node sync.js && electron-packager . Ganso-Paralelo --platform=win32 --arch=x64 --out=dist --overwrite --asar=false --ignore=\"^/dist\" --ignore=\"^/dist-installer\" --ignore=\"^/sync\\.js$\" --ignore=\"^/copy-dist\\.js$\" --ignore=\"node_modules/@electron/packager\" --icon=icon.ico",
     "postelectron:make": "node copy-dist.js",
-    "build:installer": "node sync.js && electron-builder --win --x64"
+    "build:installer": "node sync.js && electron-builder --win --x64 --publish=never",
+    "build:win": "node sync.js && electron-builder --win --x64 --publish=never"
   },
   "build": {
     "appId": "com.gansoparalelo.app",
     "productName": "Ganso-Paralelo",
     "icon": "icon.ico",
+    "asar": false,
     "files": [
       "**/*",
       "!dist/**",
@@ -50,14 +52,18 @@
       ]
     },
     "nsis": {
-      "oneClick": true,
+      "oneClick": false,
       "perMachine": false,
       "allowElevation": false,
+      "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "installerIcon": "icon.ico",
       "uninstallerIcon": "icon.ico",
       "shortcutName": "Ganso-Paralelo"
+    },
+    "portable": {
+      "artifactName": "${productName} Portable.${ext}"
     },
     "directories": {
       "output": "dist-installer"
